@@ -178,13 +178,12 @@ func read_checkpoint(checkpoint: String, config: inout Config, weights: inout Tr
         print("open failed!")
         exit(EXIT_FAILURE)
     }
-    
-    data = mmap(nil, file_size, PROT_READ, MAP_PRIVATE, Int(fd), 0)
-    if data == MAP_FAILED {
+    var ptr = mmap(nil, file_size, PROT_READ, MAP_PRIVATE, fd, 0)
+    guard ptr != nil else {
         print("mmap failed!")
         exit(EXIT_FAILURE)
     }
-    
+    data = ptr!.assumingMemoryBound(to: Float.self)
     let weights_ptr = data!.advanced(by: MemoryLayout<Config>.size / MemoryLayout<Float>.size)
     var weights_array = Array(UnsafeBufferPointer(start: weights_ptr, count: file_size / MemoryLayout<Float>.size))
     memoryMapWeights(w: &weights, p: config, ptr: &weights_array, sharedWeights: shared_weights == 1)
