@@ -17,6 +17,17 @@ struct Config {
     var n_kv_heads: Int // number of key/value heads (can be < query heads because of multiquery)
     var vocab_size: Int // vocabulary size, usually 256 (byte-level)
     var seq_len: Int // max sequence length
+
+    init(){
+        self.dim = 0
+        self.hidden_dim = 0
+        self.n_layers = 0
+        self.n_heads = 0
+        self.n_kv_heads = 0
+        self.vocab_size = 0
+        self.seq_len = 0
+    
+    }
 }
 
 struct TransformerWeights {
@@ -38,6 +49,22 @@ struct TransformerWeights {
     var rms_final_weight: [Float] // (dim,)
     // (optional) classifier weights for the logits, on the last layer
     var wcls: [Float]?
+
+    init(){
+        self.token_embedding_table = []
+        self.rms_att_weight = []
+        self.rms_ffn_weight = []
+        self.wq = []
+        self.wk = []
+        self.wv = []
+        self.wo = []
+        self.w1 = []
+        self.w2 = []
+        self.w3 = []
+        self.rms_final_weight = []
+        self.wcls = []
+    
+    }
 }
 
 struct RunState {
@@ -55,6 +82,22 @@ struct RunState {
     // kv cache
     var key_cache: [Float]   // (layer, seq_len, dim)
     var value_cache: [Float] // (layer, seq_len, dim)
+
+    //constructor
+    init() {
+        self.x = []
+        self.xb = []
+        self.xb2 = []
+        self.hb = []
+        self.hb2 = []
+        self.q = []
+        self.k = []
+        self.v = []
+        self.att = []
+        self.logits = []
+        self.key_cache = []
+        self.value_cache = []
+    }
 }
 
 struct Transformer {
@@ -64,6 +107,16 @@ struct Transformer {
     var fd: Int32 // file descriptor for memory mapping
     var data: UnsafeMutablePointer<Float>? // memory mapped data pointer
     var fileSize: Int // size of the checkpoint file in bytes
+
+    //constructor
+    init(){
+        self.config = Config()
+        self.weights =  TransformerWeights()
+        self.state = RunState()
+        self.fd = 0
+        self.data = nil
+        self.fileSize = 0
+    }
 }
 
 func mallocRunState(s: inout RunState, p: Config) {
@@ -189,11 +242,15 @@ func read_checkpoint(checkpoint: String, config: inout Config, weights: inout Tr
     memoryMapWeights(w: &weights, p: config, ptr: &weights_array, sharedWeights: shared_weights == 1)
 }
 
-func buildTransformer(t: inout Transformer, checkpointPath: String) {
+func buildTransformer(_ checkpointPath: String) -> Transformer {
+    var t:Transformer = Transformer()
+    
     // read in the Config and the Weights from the checkpoint
     read_checkpoint(checkpoint: checkpointPath, config: &t.config, weights: &t.weights, fd: &t.fd, data: &t.data, file_size: &t.fileSize)
     // allocate the RunState buffers
     mallocRunState(s: &t.state, p: t.config)
+    
+    return t
 }
 
 func freeTransformer(t: inout Transformer) {
@@ -392,6 +449,15 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
 struct TokenIndex {
     var str: String
     var id: Int
+    init(){
+        self.str = ""
+        self.id = 0    
+    }
+
+    init(str: String, id: Int){
+        self.str = str
+        self.id = id
+    }    
 }
 
 struct Tokenizer {
@@ -401,13 +467,24 @@ struct Tokenizer {
     var vocabSize: Int
     var maxTokenLength: UInt
     var bytePieces: [UInt8] // stores all single-byte strings
+
+    init(){
+        self.vocab = []
+        self.vocabScores = []
+        self.sortedVocab = []
+        self.vocabSize = 0
+        self.maxTokenLength = 0
+        self.bytePieces = Array(repeating: 0, count: 256 * 2)
+    }
 }
 
 func compare_tokens(_ a: TokenIndex, _ b: TokenIndex) -> Bool {
     return a.str < b.str
 }
 
-func buildTokenizer(t: inout Tokenizer, tokenizerPath: String, vocabSize: Int) {
+func buildTokenizer( tokenizerPath: String, vocabSize: Int) -> Tokenizer{
+
+    var t = Tokenizer()
     t.vocabSize = vocabSize
     t.vocab = [String](repeating: "", count: vocabSize)
     t.vocabScores = [Float](repeating: 0.0, count: vocabSize)
@@ -440,6 +517,9 @@ func buildTokenizer(t: inout Tokenizer, tokenizerPath: String, vocabSize: Int) {
         print("Couldn't load \(tokenizerPath)")
         exit(EXIT_FAILURE)
     }
+
+    return t
+
 }
 
 func freeTokenizer(t: inout Tokenizer) {
@@ -460,17 +540,17 @@ func decode(t: inout Tokenizer, prevToken: Int, token: Int) -> String {
     return piece
 }
 
-func safePrint(_ piece: UnsafePointer<CChar>?) {
-    guard let piece = piece else { return }
-    if piece.pointee == 0 { return }
-    if piece.advanced(by: 1).pointee == 0 {
-        let byteVal = UInt8(bitPattern: piece.pointee)
-        if !(isprint(Int32(byteVal)) != 0 || isspace(Int32(byteVal)) != 0) {
-            return
-        }
-    }
-    print(String(cString: piece))
-}
+//func safePrint(_ piece: UnsafePointer<CChar>?) {
+//    guard let piece = piece else { return }
+//    if piece.pointee == 0 { return }
+//    if piece.advanced(by: 1).pointee == 0 {
+//        let byteVal = UInt8(bitPattern: piece.pointee)
+//        if !(isprint(Int32(byteVal)) != 0 || isspace(Int32(byteVal)) != 0) {
+//            return
+//        }
+//    }
+//    print(String(cString: piece))
+//}
 
 func strLookup(str: String, sortedVocab: inout [TokenIndex], vocabSize: Int) -> Int {
     // efficiently find the perfect match for str in vocab, return its index or -1 if not found
@@ -580,6 +660,353 @@ func encode(t: inout Tokenizer, text: String, bos: Int8, eos: Int8, tokens: inou
     }
 }
 
+// ----------------------------------------------------------------------------
+// The Sampler, which takes logits and returns a sampled token
+// sampling can be done in a few ways: greedy argmax, sampling, top-p sampling
 
-print("Hello, World!")
+struct ProbIndex {
+    var prob: Float
+    var index: Int
+} // struct used when sorting probabilities during top-p sampling
+
+struct Sampler {
+    var vocab_size: Int
+    var probindex: [ProbIndex] // buffer used in top-p sampling
+    var temperature: Float
+    var topp: Float
+    var rng_state: UInt64
+}
+
+func sampleArgmax(probabilities: [Float]) -> Int {
+    // return the index that has the highest probability
+    var maxIndex = 0
+    var maxProbability = probabilities[0]
+    for i in 1..<probabilities.count {
+        if probabilities[i] > maxProbability {
+            maxIndex = i
+            maxProbability = probabilities[i]
+        }
+    }
+    return maxIndex
+}
+
+func sampleMult(probabilities: [Float], n: Int, coin: Float) -> Int {
+    // sample index from probabilities (they must sum to 1!)
+    // coin is a random number in [0, 1), usually from random_f32()
+    var cdf: Float = 0.0
+    for i in 0..<n {
+        cdf += probabilities[i]
+        if coin < cdf {
+            return i
+        }
+    }
+    return n - 1 // in case of rounding errors
+}
+
+func compare(a: UnsafeRawPointer, b: UnsafeRawPointer) -> Int {
+    let a_ = a.assumingMemoryBound(to: ProbIndex.self)
+    let b_ = b.assumingMemoryBound(to: ProbIndex.self)
+    if a_.pointee.prob > b_.pointee.prob { return -1 }
+    if a_.pointee.prob < b_.pointee.prob { return 1 }
+    return 0
+}
+
+func sample_topp(probabilities: inout [Float], n: Int, topp: Float, probindex: inout [ProbIndex], coin: Float) -> Int {
+    var n0 = 0
+    let cutoff = (1.0 - topp) / Float(n - 1)
+    for i in 0..<n {
+        if probabilities[i] >= cutoff {
+            probindex[n0].index = i
+            probindex[n0].prob = probabilities[i]
+            n0 += 1
+        }
+    }
+    probindex[0..<n0].sort { $0.prob > $1.prob }
+
+    var cumulative_prob: Float = 0.0
+    var last_idx = n0 - 1
+    for i in 0..<n0 {
+        cumulative_prob += probindex[i].prob
+        if cumulative_prob > topp {
+            last_idx = i
+            break
+        }
+    }
+
+    let r = coin * cumulative_prob
+    var cdf: Float = 0.0
+    for i in 0...last_idx {
+        cdf += probindex[i].prob
+        if r < cdf {
+            return probindex[i].index
+        }
+    }
+    return probindex[last_idx].index
+}
+
+func buildSampler(sampler: inout Sampler, vocabSize: Int, temperature: Float, topp: Float, rngSeed: UInt64) {
+    sampler.vocab_size = vocabSize
+    sampler.temperature = temperature
+    sampler.topp = topp
+    sampler.rng_state = rngSeed
+    sampler.probindex = Array(repeating: ProbIndex(prob: 0.0, index: 0), count: sampler.vocab_size)
+}
+
+func freeSampler(sampler: inout Sampler) {
+    sampler.probindex = []
+}
+
+func randomU32(state: inout UInt64) -> UInt32 {
+    state ^= state >> 12
+    state ^= state << 25
+    state ^= state >> 27
+    return UInt32((state * 0x2545F4914F6CDD1D) >> 32)
+}
+
+func randomF32(state: inout UInt64) -> Float {
+    return Float(randomU32(state: &state) >> 8) / 16777216.0
+}
+
+func sample(sampler: inout Sampler, logits: inout [Float]) -> Int {
+    var next: Int
+    if sampler.temperature == 0.0 {
+        next = sampleArgmax(probabilities: logits)
+    } else {
+        for q in 0..<sampler.vocab_size {
+            logits[q] /= sampler.temperature
+        }
+        softmax(&logits)
+        let coin = randomF32(state: &sampler.rng_state)
+        if sampler.topp <= 0 || sampler.topp >= 1 {
+            next = sampleMult(probabilities: logits, n: sampler.vocab_size, coin: coin)
+        } else {
+            next = sample_topp(probabilities: &logits, n: sampler.vocab_size, topp: sampler.topp, probindex: &sampler.probindex, coin: coin)
+        }
+    }
+    return next
+}
+
+
+// ----------------------------------------------------------------------------
+// utilities: time
+
+func timeInMs() -> Int64 {
+    let time = Date().timeIntervalSince1970
+    return Int64(time * 1000)
+}
+
+
+// ----------------------------------------------------------------------------
+// generation loop
+func generate(transformer: Transformer, tokenizer: Tokenizer, sampler: inout Sampler, prompt: String?, steps: Int) {
+    let prompt = prompt ?? ""
+
+    // encode the (string) prompt into tokens sequence
+    var numPromptTokens = 0
+    var promptTokens = [Int](repeating: 0, count: prompt.count + 3) // +3 for '\0', ?BOS, ?EOS
+    
+
+    var tokenizer = tokenizer // Make the 'tokenizer' parameter mutable
+    var transformer = transformer // Make the 'transformer' parameter mutable
+    encode(t: &tokenizer, text: prompt, bos: 1, eos: 0, tokens: &promptTokens, n_tokens: &numPromptTokens)
+    if numPromptTokens < 1 {
+        print("something is wrong, expected at least 1 prompt token")
+        exit(EXIT_FAILURE)
+    }
+
+    // start the main loop
+    var start: Int64 = 0  // used to time our code, only initialized after first iteration
+    var next: Int        // will store the next token in the sequence
+    var token = promptTokens[0] // kick off with the first token in the prompt
+    var pos = 0     // position in the sequence
+    while pos < steps {
+
+        // forward the transformer to get logits for the next token
+        var logits = forward(transformer: &transformer, token: token, pos: pos)
+
+        // advance the state machine
+        if pos < numPromptTokens - 1 {
+            // if we are still processing the input prompt, force the next prompt token
+            next = promptTokens[pos + 1]
+        } else {
+            // otherwise sample the next token from the logits
+            next = sample(sampler: &sampler, logits: &logits)
+        }
+        pos += 1
+
+        // data-dependent terminating condition: the BOS (=1) token delimits sequences
+        if next == 1 { break }
+
+        // print the token as string, decode it with the Tokenizer object
+        let piece = decode(t: &tokenizer, prevToken: token, token: next)
+        print(piece)
+        fflush(stdout)
+        token = next
+
+        // init the timer here because the first iteration can be slower
+        if start == 0 { start = timeInMs() }
+    }
+    print("\n")
+
+    // report achieved tok/s (pos-1 because the timer starts after first iteration)
+    if pos > 1 {
+        let end = timeInMs()
+        print("achieved tok/s: \(Double(pos-1) / Double(end-start)*1000)")
+    }
+
+    promptTokens = []
+}
+
+func readStdin(guide: String) -> String? {
+    print(guide, terminator: "")
+    let buffer = readLine()
+    return buffer
+}
+
+
+// ----------------------------------------------------------------------------
+// chat loop
+// I manually inspected the tokens for a few chat conversations compared to
+// python reference and that seemed ok, but this was not thoroughly tested and
+// is not safely implemented, it's more a proof of concept atm.
+
+func chat(transformer: Transformer, tokenizer: Tokenizer, sampler: inout Sampler, cliUserPrompt: String?, cliSystemPrompt: String?, steps: Int) {
+    var systemPrompt = ""
+    var userPrompt = ""
+    var renderedPrompt = ""
+    var numPromptTokens = 0
+    var promptTokens = [Int](repeating: 0, count: 1152)
+    var userIdx: Int = 0
+
+    var userTurn: Bool = true
+    var next: Int = 0
+    var token: Int = 0
+    var pos = 0
+    
+    var tokenizer = tokenizer // Make the 'tokenizer' parameter mutable
+    var transformer = transformer // Make the 'transformer' parameter mutable
+ 
+    while pos < steps {
+        if userTurn {
+            if pos == 0 {
+                if let cliSystemPrompt = cliSystemPrompt {
+                    systemPrompt = cliSystemPrompt
+                } else {
+                    systemPrompt = readStdin(guide: "Enter system prompt (optional): ") ?? ""
+                }
+            }
+            if pos == 0 && cliUserPrompt != nil {
+                userPrompt = cliUserPrompt!
+            } else {
+                userPrompt = readStdin(guide: "User: ") ?? ""
+            }
+            if pos == 0 && !systemPrompt.isEmpty {
+                let systemTemplate = "[INST] <<SYS>>\n%@\n<</SYS>>\n\n%@ [/INST]"
+                renderedPrompt = String(format: systemTemplate, systemPrompt, userPrompt)
+            } else {
+                let userTemplate = "[INST] %@ [/INST]"
+                renderedPrompt = String(format: userTemplate, userPrompt)
+            }
+            encode(t: &tokenizer, text: renderedPrompt, bos: 1, eos: 0, tokens: &promptTokens, n_tokens: &numPromptTokens)
+            userIdx = 0
+            userTurn = false
+            print("Assistant: ", terminator: "")
+        }
+
+        if userIdx < numPromptTokens {
+            token = promptTokens[userIdx]
+            userIdx += 1
+        } else {
+            token = next
+        }
+        if token == 2 { userTurn = true }
+
+        var logits = forward(transformer: &transformer, token: token, pos: pos)
+        next = sample(sampler: &sampler, logits: &logits)
+        pos += 1
+
+        if userIdx >= numPromptTokens && next != 2 {
+            let piece = decode(t: &tokenizer, prevToken: token, token: next)
+            print(piece, terminator: "")
+            fflush(stdout)
+        }
+        if next == 2 { print("\n") }
+    }
+    print("\n")
+    promptTokens = []
+}
+
+func errorUsage() {
+    print("Usage:   run <checkpoint> [options]")
+    print("Example: run model.bin -n 256 -i \"Once upon a time\"")
+    print("Options:")
+    print("  -t <float>  temperature in [0,inf], default 1.0")
+    print("  -p <float>  p value in top-p (nucleus) sampling in [0,1] default 0.9")
+    print("  -s <int>    random seed, default time(NULL)")
+    print("  -n <int>    number of steps to run for, default 256. 0 = max_seq_len")
+    print("  -i <string> input prompt")
+    print("  -z <string> optional path to custom tokenizer")
+    print("  -m <string> mode: generate|chat, default: generate")
+    print("  -y <string> (optional) system prompt in chat mode")
+    exit(EXIT_FAILURE)
+}
+
+var checkpointPath: String? = nil
+var tokenizerPath: String = "tokenizer.bin"
+var temperature: Float = 1.0
+var topp: Float = 0.9
+var steps: Int = 256
+var prompt: String? = nil
+var rngSeed: UInt64 = 0
+var mode: String = "generate"
+var systemPrompt: String? = nil
+
+let args = CommandLine.arguments
+if args.count >= 2 { checkpointPath = args[1] } else { errorUsage() }
+guard let checkpointPath = checkpointPath else { 
+    errorUsage()
+    exit(EXIT_FAILURE)
+}
+for i in stride(from: 2, to: args.count, by: 2) {
+    if i + 1 >= args.count { errorUsage() }
+    if args[i].first != "-" { errorUsage() }
+    if args[i].count != 2 { errorUsage() }
+    switch args[i] {
+    case "-t": temperature = Float(args[i + 1]) ?? 1.0
+    case "-p": topp = Float(args[i + 1]) ?? 0.9
+    case "-s": rngSeed = UInt64(args[i + 1]) ?? 0
+    case "-n": steps = Int(args[i + 1]) ?? 256
+    case "-i": prompt = args[i + 1]
+    case "-z": tokenizerPath = args[i + 1]
+    case "-m": mode = args[i + 1]
+    case "-y": systemPrompt = args[i + 1]
+    default: errorUsage()
+    }
+}
+
+if rngSeed <= 0 { rngSeed = UInt64(Date().timeIntervalSince1970) }
+if temperature < 0.0 { temperature = 0.0 }
+if topp < 0.0 || topp > 1.0 { topp = 0.9 }
+if steps < 0 { steps = 0 }
+
+var transformer = buildTransformer(checkpointPath)
+if steps == 0 || steps > transformer.config.seq_len { steps = transformer.config.seq_len }
+
+var tokenizer = buildTokenizer(tokenizerPath: tokenizerPath, vocabSize: transformer.config.vocab_size)
+
+//var sampler = Sampler()
+//buildSampler(&sampler, transformer.config.vocabSize, temperature, topp, rngSeed)
+//
+//if mode == "generate" {
+//    generate(&transformer, &tokenizer, &sampler, prompt, steps)
+//} else if mode == "chat" {
+//    chat(&transformer, &tokenizer, &sampler, prompt, systemPrompt, steps)
+//} else {
+//    print("unknown mode: \(mode)")
+//    errorUsage()
+//}
+//
+//freeSampler(&sampler)
+//freeTokenizer(&tokenizer)
+//freeTransformer(&transformer)
 
