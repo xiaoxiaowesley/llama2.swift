@@ -1001,70 +1001,68 @@ func errorUsage() {
     exit(EXIT_FAILURE)
 }
 
-// var checkpointPath: String? = nil
-// var tokenizerPath: String = "tokenizer.bin"
-// var temperature: Float = 1.0
-// var topp: Float = 0.9
-// var steps: Int = 256
-// var prompt: String? = nil
-// var rngSeed: UInt64 = 0
-// var mode: String = "generate"
-// var systemPrompt: String? = nil
+var checkpointPath: String? = nil
+var tokenizerPath: String = "tokenizer.bin"
+var temperature: Float = 1.0
+var topp: Float = 0.9
+var steps: Int = 256
+var prompt: String? = nil
+var rngSeed: UInt64 = 0
+var mode: String = "generate"
+var systemPrompt: String? = nil
 
-// let args = CommandLine.arguments
-// if args.count >= 2 { checkpointPath = args[1] } else { errorUsage() }
-// guard let checkpointPath = checkpointPath else {
-//     errorUsage()
-//     exit(EXIT_FAILURE)
-// }
-// for i in stride(from: 2, to: args.count, by: 2) {
-//     if i + 1 >= args.count { errorUsage() }
-//     if args[i].first != "-" { errorUsage() }
-//     if args[i].count != 2 { errorUsage() }
-//     switch args[i] {
-//     case "-t": temperature = Float(args[i + 1]) ?? 1.0
-//     case "-p": topp = Float(args[i + 1]) ?? 0.9
-//     case "-s": rngSeed = UInt64(args[i + 1]) ?? 0
-//     case "-n": steps = Int(args[i + 1]) ?? 256
-//     case "-i": prompt = args[i + 1]
-//     case "-z": tokenizerPath = args[i + 1]
-//     case "-m": mode = args[i + 1]
-//     case "-y": systemPrompt = args[i + 1]
-//     default: errorUsage()
-//     }
-// }
+let args = CommandLine.arguments
+if args.count >= 2 { checkpointPath = args[1] } else { errorUsage() }
+guard let checkpointPath = checkpointPath else {
+    errorUsage()
+    exit(EXIT_FAILURE)
+}
+for i in stride(from: 2, to: args.count, by: 2) {
+    if i + 1 >= args.count { errorUsage() }
+    if args[i].first != "-" { errorUsage() }
+    if args[i].count != 2 { errorUsage() }
+    switch args[i] {
+    case "-t": temperature = Float(args[i + 1]) ?? 1.0
+    case "-p": topp = Float(args[i + 1]) ?? 0.9
+    case "-s": rngSeed = UInt64(args[i + 1]) ?? 0
+    case "-n": steps = Int(args[i + 1]) ?? 256
+    case "-i": prompt = args[i + 1]
+    case "-z": tokenizerPath = args[i + 1]
+    case "-m": mode = args[i + 1]
+    case "-y": systemPrompt = args[i + 1]
+    default: errorUsage()
+    }
+}
 
-// if rngSeed <= 0 { rngSeed = UInt64(Date().timeIntervalSince1970) }
-// if temperature < 0.0 { temperature = 0.0 }
-// if topp < 0.0 || topp > 1.0 { topp = 0.9 }
-// if steps < 0 { steps = 0 }
+if rngSeed <= 0 { rngSeed = UInt64(Date().timeIntervalSince1970) }
+if temperature < 0.0 { temperature = 0.0 }
+if topp < 0.0 || topp > 1.0 { topp = 0.9 }
+if steps < 0 { steps = 0 }
 
-// var transformer = buildTransformer(checkpointPath)
-// if steps == 0 || steps > transformer.config.seq_len { steps = transformer.config.seq_len }
+var transformer = buildTransformer(checkpointPath)
+if steps == 0 || steps > transformer.config.seq_len { steps = transformer.config.seq_len }
 
-// var tokenizer = buildTokenizer(
-//     tokenizerPath: tokenizerPath, vocabSize: transformer.config.vocab_size)
+var tokenizer = buildTokenizer(
+    tokenizerPath: tokenizerPath, vocabSize: transformer.config.vocab_size)
 
-// var sampler = buildSampler(
-//     vocabSize: transformer.config.vocab_size, temperature: temperature, topp: topp, rngSeed: rngSeed
-// )
+var sampler = buildSampler(
+    vocabSize: transformer.config.vocab_size, temperature: temperature, topp: topp, rngSeed: rngSeed
+)
 
-// if mode == "generate" {
-//     generate(
-//         transformer: transformer, tokenizer: tokenizer, sampler: &sampler, prompt: prompt,
-//         steps: steps)
-// } else if mode == "chat" {
-//     chat(
-//         transformer: transformer, tokenizer: tokenizer, sampler: &sampler, cliUserPrompt: prompt,
-//         cliSystemPrompt: systemPrompt, steps: steps)
-// } else {
-//     print("unknown mode: \(mode)")
-//     errorUsage()
-// }
+if mode == "generate" {
+    generate(
+        transformer: transformer, tokenizer: tokenizer, sampler: &sampler, prompt: prompt,
+        steps: steps)
+} else if mode == "chat" {
+    chat(
+        transformer: transformer, tokenizer: tokenizer, sampler: &sampler, cliUserPrompt: prompt,
+        cliSystemPrompt: systemPrompt, steps: steps)
+} else {
+    print("unknown mode: \(mode)")
+    errorUsage()
+}
 
-// freeSampler(sampler: &sampler)
-// freeTokenizer(t: &tokenizer)
-// freeTransformer(t: &transformer)
+freeSampler(sampler: &sampler)
+freeTokenizer(t: &tokenizer)
+freeTransformer(t: &transformer)
 
-
-print("Hello, world!")
