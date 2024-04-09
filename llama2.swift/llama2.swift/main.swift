@@ -505,7 +505,7 @@ func compare_tokens(_ a: TokenIndex, _ b: TokenIndex) -> Bool {
 }
 
 func buildTokenizer(tokenizerPath: String, vocabSize: Int) -> Tokenizer {
-
+    print("Building tokenizer from \(tokenizerPath) with vocab size \(vocabSize)")
     var t = Tokenizer()
     t.vocabSize = vocabSize
     t.vocab = [String](repeating: "", count: vocabSize)
@@ -522,19 +522,22 @@ func buildTokenizer(tokenizerPath: String, vocabSize: Int) -> Tokenizer {
             contentsOf: URL(fileURLWithPath: tokenizerPath), options: .mappedIfSafe)
         var readPosition = 0
 
-        t.maxTokenLength = fileData.withUnsafeBytes {
-            $0.load(fromByteOffset: readPosition, as: Int32.self)
+        let maxTokenLengthData = fileData.subdata(in: readPosition..<(readPosition + MemoryLayout<Int32>.size))
+        t.maxTokenLength = maxTokenLengthData.withUnsafeBytes {
+            $0.load(as: Int32.self)
         }
         readPosition += MemoryLayout<Int32>.size
 
         for i in 0..<vocabSize {
-            t.vocabScores[i] = fileData.withUnsafeBytes {
-                $0.load(fromByteOffset: readPosition, as: Float.self)
+            let scoreData = fileData.subdata(in: readPosition..<(readPosition + MemoryLayout<Float>.size))
+            t.vocabScores[i] = scoreData.withUnsafeBytes {
+                $0.load(as: Float.self)
             }
             readPosition += MemoryLayout<Float>.size
 
-            let len = fileData.withUnsafeBytes {
-                $0.load(fromByteOffset: readPosition, as: Int32.self)
+            let lenData = fileData.subdata(in: readPosition..<(readPosition + MemoryLayout<Int32>.size))
+            let len = lenData.withUnsafeBytes {
+                $0.load(as: Int32.self)
             }
             readPosition += MemoryLayout<Int32>.size
 
@@ -546,9 +549,7 @@ func buildTokenizer(tokenizerPath: String, vocabSize: Int) -> Tokenizer {
         print("Couldn't load \(tokenizerPath)")
         exit(EXIT_FAILURE)
     }
-
     return t
-
 }
 
 func freeTokenizer(t: inout Tokenizer) {
@@ -1002,7 +1003,7 @@ func errorUsage() {
 }
 
 var checkpointPath: String? = nil
-var tokenizerPath: String = "tokenizer.bin"
+var tokenizerPath: String = FileManager.default.currentDirectoryPath + "/tokenizer.bin"
 var temperature: Float = 1.0
 var topp: Float = 0.9
 var steps: Int = 256
