@@ -310,15 +310,18 @@ func softmax(_ x: inout [Float]) {
     }
 }
 
-func matmul(_ xout: inout [Float], _ x: [Float], _ w: [Float], _ n: Int, _ d: Int) {
+ func matmul(_ xout: inout [Float], _ x: [Float], _ w: [Float], _ n: Int, _ d: Int) {
     // W (d,n) @ x (n,) -> xout (d,)
     // by far the most amount of time is spent inside this little function
+    let lock = NSLock()
     DispatchQueue.concurrentPerform(iterations: d) { i in
         var val: Float = 0.0
         for j in 0..<n {
             val += w[i * n + j] * x[j]
         }
+        lock.lock()
         xout[i] = val
+        lock.unlock()
     }
 }
 
@@ -791,6 +794,7 @@ func buildSampler(vocabSize: Int, temperature: Float, topp: Float, rngSeed: UInt
     sampler.temperature = temperature
     sampler.topp = topp
     sampler.rng_state = rngSeed
+    print("seed:\(rngSeed)")
     sampler.probindex = Array(repeating: ProbIndex(prob: 0.0, index: 0), count: sampler.vocab_size)
     return sampler
 }
