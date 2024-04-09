@@ -10,15 +10,15 @@ import Foundation
 // ----------------------------------------------------------------------------
 // Transformer model
 struct Config {
-    var dim: Int // transformer dimension
-    var hidden_dim: Int // for ffn layers
-    var n_layers: Int // number of layers
-    var n_heads: Int // number of query heads
-    var n_kv_heads: Int // number of key/value heads (can be < query heads because of multiquery)
-    var vocab_size: Int // vocabulary size, usually 256 (byte-level)
-    var seq_len: Int // max sequence length
+    var dim: Int  // transformer dimension
+    var hidden_dim: Int  // for ffn layers
+    var n_layers: Int  // number of layers
+    var n_heads: Int  // number of query heads
+    var n_kv_heads: Int  // number of key/value heads (can be < query heads because of multiquery)
+    var vocab_size: Int  // vocabulary size, usually 256 (byte-level)
+    var seq_len: Int  // max sequence length
 
-    init(){
+    init() {
         self.dim = 0
         self.hidden_dim = 0
         self.n_layers = 0
@@ -26,31 +26,30 @@ struct Config {
         self.n_kv_heads = 0
         self.vocab_size = 0
         self.seq_len = 0
-    
     }
 }
 
 struct TransformerWeights {
     // token embedding table
-    var token_embedding_table: [Float]    // (vocab_size, dim)
+    var token_embedding_table: [Float]  // (vocab_size, dim)
     // weights for rmsnorms
-    var rms_att_weight: [Float] // (layer, dim) rmsnorm weights
-    var rms_ffn_weight: [Float] // (layer, dim)
+    var rms_att_weight: [Float]  // (layer, dim) rmsnorm weights
+    var rms_ffn_weight: [Float]  // (layer, dim)
     // weights for matmuls. note dim == n_heads * head_size
-    var wq: [Float] // (layer, dim, n_heads * head_size)
-    var wk: [Float] // (layer, dim, n_kv_heads * head_size)
-    var wv: [Float] // (layer, dim, n_kv_heads * head_size)
-    var wo: [Float] // (layer, n_heads * head_size, dim)
+    var wq: [Float]  // (layer, dim, n_heads * head_size)
+    var wk: [Float]  // (layer, dim, n_kv_heads * head_size)
+    var wv: [Float]  // (layer, dim, n_kv_heads * head_size)
+    var wo: [Float]  // (layer, n_heads * head_size, dim)
     // weights for ffn
-    var w1: [Float] // (layer, hidden_dim, dim)
-    var w2: [Float] // (layer, dim, hidden_dim)
-    var w3: [Float] // (layer, hidden_dim, dim)
+    var w1: [Float]  // (layer, hidden_dim, dim)
+    var w2: [Float]  // (layer, dim, hidden_dim)
+    var w3: [Float]  // (layer, hidden_dim, dim)
     // final rmsnorm
-    var rms_final_weight: [Float] // (dim,)
+    var rms_final_weight: [Float]  // (dim,)
     // (optional) classifier weights for the logits, on the last layer
     var wcls: [Float]?
 
-    init(){
+    init() {
         self.token_embedding_table = []
         self.rms_att_weight = []
         self.rms_ffn_weight = []
@@ -63,25 +62,25 @@ struct TransformerWeights {
         self.w3 = []
         self.rms_final_weight = []
         self.wcls = []
-    
+
     }
 }
 
 struct RunState {
     // current wave of activations
-    var x: [Float] // activation at current time stamp (dim,)
-    var xb: [Float] // same, but inside a residual branch (dim,)
-    var xb2: [Float] // an additional buffer just for convenience (dim,)
-    var hb: [Float] // buffer for hidden dimension in the ffn (hidden_dim,)
-    var hb2: [Float] // buffer for hidden dimension in the ffn (hidden_dim,)
-    var q: [Float] // query (dim,)
-    var k: [Float] // key (dim,)
-    var v: [Float] // value (dim,)
-    var att: [Float] // buffer for scores/attention values (n_heads, seq_len)
-    var logits: [Float] // output logits
+    var x: [Float]  // activation at current time stamp (dim,)
+    var xb: [Float]  // same, but inside a residual branch (dim,)
+    var xb2: [Float]  // an additional buffer just for convenience (dim,)
+    var hb: [Float]  // buffer for hidden dimension in the ffn (hidden_dim,)
+    var hb2: [Float]  // buffer for hidden dimension in the ffn (hidden_dim,)
+    var q: [Float]  // query (dim,)
+    var k: [Float]  // key (dim,)
+    var v: [Float]  // value (dim,)
+    var att: [Float]  // buffer for scores/attention values (n_heads, seq_len)
+    var logits: [Float]  // output logits
     // kv cache
-    var key_cache: [Float]   // (layer, seq_len, dim)
-    var value_cache: [Float] // (layer, seq_len, dim)
+    var key_cache: [Float]  // (layer, seq_len, dim)
+    var value_cache: [Float]  // (layer, seq_len, dim)
 
     //constructor
     init() {
@@ -101,17 +100,17 @@ struct RunState {
 }
 
 struct Transformer {
-    var config: Config // the hyperparameters of the architecture (the blueprint)
-    var weights: TransformerWeights // the weights of the model
-    var state: RunState // buffers for the "wave" of activations in the forward pass
-    var fd: Int32 // file descriptor for memory mapping
-    var data: UnsafeMutablePointer<Float>? // memory mapped data pointer
-    var fileSize: Int // size of the checkpoint file in bytes
+    var config: Config  // the hyperparameters of the architecture (the blueprint)
+    var weights: TransformerWeights  // the weights of the model
+    var state: RunState  // buffers for the "wave" of activations in the forward pass
+    var fd: Int32  // file descriptor for memory mapping
+    var data: UnsafeMutablePointer<Float>?  // memory mapped data pointer
+    var fileSize: Int  // size of the checkpoint file in bytes
 
     //constructor
-    init(){
+    init() {
         self.config = Config()
-        self.weights =  TransformerWeights()
+        self.weights = TransformerWeights()
         self.state = RunState()
         self.fd = 0
         self.data = nil
@@ -134,10 +133,11 @@ func mallocRunState(s: inout RunState, p: Config) {
 
     // ensure all mallocs went fine
     if s.x.isEmpty || s.xb.isEmpty || s.xb2.isEmpty || s.hb.isEmpty || s.hb2.isEmpty || s.q.isEmpty
-        || s.key_cache.isEmpty || s.value_cache.isEmpty || s.att.isEmpty || s.logits.isEmpty {
+        || s.key_cache.isEmpty || s.value_cache.isEmpty || s.att.isEmpty || s.logits.isEmpty
+    {
         print("malloc failed!")
         exit(EXIT_FAILURE)
-    }    
+    }
 }
 
 func freeRunState(s: inout RunState) {
@@ -153,7 +153,9 @@ func freeRunState(s: inout RunState) {
     s.value_cache.removeAll()
 }
 
-func memoryMapWeights(w: inout TransformerWeights, p: Config, ptr: inout [Float], sharedWeights: Bool) {
+func memoryMapWeights(
+    w: inout TransformerWeights, p: Config, ptr: inout [Float], sharedWeights: Bool
+) {
     let headSize = p.dim / p.n_heads
     let nLayers = p.n_layers
     let vocabSizeDim = p.vocab_size * p.dim
@@ -198,35 +200,37 @@ func memoryMapWeights(w: inout TransformerWeights, p: Config, ptr: inout [Float]
     w.rms_final_weight = Array(ptr[0..<p.dim])
     ptr.removeFirst(p.dim)
 
-    ptr.removeFirst(seqLenHeadSize) // skip what used to be freq_cis_real (for RoPE)
-    ptr.removeFirst(seqLenHeadSize) // skip what used to be freq_cis_imag (for RoPE)
+    ptr.removeFirst(seqLenHeadSize)  // skip what used to be freq_cis_real (for RoPE)
+    ptr.removeFirst(seqLenHeadSize)  // skip what used to be freq_cis_imag (for RoPE)
 
     w.wcls = sharedWeights ? w.token_embedding_table : Array(ptr)
 }
 
-
-func read_checkpoint(checkpoint: String, config: inout Config, weights: inout TransformerWeights, fd: inout Int32, data: inout UnsafeMutablePointer<Float>?, file_size: inout Int) {
+func read_checkpoint(
+    checkpoint: String, config: inout Config, weights: inout TransformerWeights, fd: inout Int32,
+    data: inout UnsafeMutablePointer<Float>?, file_size: inout Int
+) {
     guard let file = fopen(checkpoint, "rb") else {
         print("Couldn't open file \(checkpoint)")
         exit(EXIT_FAILURE)
     }
-    
+
     // read in the config header
     if fread(&config, MemoryLayout<Config>.size, 1, file) != 1 {
         exit(EXIT_FAILURE)
     }
-    
+
     // negative vocab size is hacky way of signaling unshared weights. bit yikes.
     let shared_weights = config.vocab_size > 0 ? 1 : 0
     config.vocab_size = abs(config.vocab_size)
-    
+
     // figure out the file size
-    fseek(file, 0, SEEK_END) // move file pointer to end of file
-    file_size = ftell(file) // get the file size, in bytes
+    fseek(file, 0, SEEK_END)  // move file pointer to end of file
+    file_size = ftell(file)  // get the file size, in bytes
     fclose(file)
-    
+
     // memory map the Transformer weights into the data pointer
-    fd = open(checkpoint, O_RDONLY) // open in read only mode
+    fd = open(checkpoint, O_RDONLY)  // open in read only mode
     if fd == -1 {
         print("open failed!")
         exit(EXIT_FAILURE)
@@ -238,18 +242,22 @@ func read_checkpoint(checkpoint: String, config: inout Config, weights: inout Tr
     }
     data = ptr!.assumingMemoryBound(to: Float.self)
     let weights_ptr = data!.advanced(by: MemoryLayout<Config>.size / MemoryLayout<Float>.size)
-    var weights_array = Array(UnsafeBufferPointer(start: weights_ptr, count: file_size / MemoryLayout<Float>.size))
-    memoryMapWeights(w: &weights, p: config, ptr: &weights_array, sharedWeights: shared_weights == 1)
+    var weights_array = Array(
+        UnsafeBufferPointer(start: weights_ptr, count: file_size / MemoryLayout<Float>.size))
+    memoryMapWeights(
+        w: &weights, p: config, ptr: &weights_array, sharedWeights: shared_weights == 1)
 }
 
 func buildTransformer(_ checkpointPath: String) -> Transformer {
-    var t:Transformer = Transformer()
-    
+    var t: Transformer = Transformer()
+
     // read in the Config and the Weights from the checkpoint
-    read_checkpoint(checkpoint: checkpointPath, config: &t.config, weights: &t.weights, fd: &t.fd, data: &t.data, file_size: &t.fileSize)
+    read_checkpoint(
+        checkpoint: checkpointPath, config: &t.config, weights: &t.weights, fd: &t.fd,
+        data: &t.data, file_size: &t.fileSize)
     // allocate the RunState buffers
     mallocRunState(s: &t.state, p: t.config)
-    
+
     return t
 }
 
@@ -322,8 +330,8 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
     var x = s.x
     let dim = p.dim
     let kv_dim = (p.dim * p.n_kv_heads) / p.n_heads
-    let kv_mul = p.n_heads / p.n_kv_heads // integer multiplier of the kv sharing in multiquery
-    let hidden_dim =  p.hidden_dim
+    let kv_mul = p.n_heads / p.n_kv_heads  // integer multiplier of the kv sharing in multiquery
+    let hidden_dim = p.hidden_dim
     let head_size = dim / p.n_heads
 
     // copy the token embedding into x
@@ -333,17 +341,22 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
     // forward all the layers
     for l in 0..<p.n_layers {
         // attention rmsnorm
-        rmsnorm(o: &s.xb, x: x, weight: Array(w.rms_att_weight[(l*dim)..<(l*dim + dim)]), size: dim)
+        rmsnorm(
+            o: &s.xb, x: x, weight: Array(w.rms_att_weight[(l * dim)..<(l * dim + dim)]), size: dim)
 
         // key and value point to the kv cache
-        let loff = l * p.seq_len * kv_dim // kv cache layer offset for convenience
+        let loff = l * p.seq_len * kv_dim  // kv cache layer offset for convenience
         s.k = Array(s.key_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
         s.v = Array(s.value_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
 
         // qkv matmuls for this position
-        matmul(&s.q, s.xb, Array(w.wq[(l*dim*dim)..<(l*dim*dim + dim*dim)]), dim, dim)
-        matmul(&s.k, s.xb, Array(w.wk[(l*dim*kv_dim)..<(l*dim*kv_dim + dim*kv_dim)]), dim, kv_dim)
-        matmul(&s.v, s.xb, Array(w.wv[(l*dim*kv_dim)..<(l*dim*kv_dim + dim*kv_dim)]), dim, kv_dim)
+        matmul(&s.q, s.xb, Array(w.wq[(l * dim * dim)..<(l * dim * dim + dim * dim)]), dim, dim)
+        matmul(
+            &s.k, s.xb, Array(w.wk[(l * dim * kv_dim)..<(l * dim * kv_dim + dim * kv_dim)]), dim,
+            kv_dim)
+        matmul(
+            &s.v, s.xb, Array(w.wv[(l * dim * kv_dim)..<(l * dim * kv_dim + dim * kv_dim)]), dim,
+            kv_dim)
 
         // RoPE relative positional encoding: complex-valued rotate q and k in each head
         for i in stride(from: 0, to: dim, by: 2) {
@@ -352,13 +365,13 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
             let val = Float(pos) * freq
             let fcr = cos(val)
             let fci = sin(val)
-            let rotn = i < kv_dim ? 2 : 1 // how many vectors? 2 = q & k, 1 = q only
+            let rotn = i < kv_dim ? 2 : 1  // how many vectors? 2 = q & k, 1 = q only
             for v in 0..<rotn {
-                var vec = v == 0 ? s.q : s.k // the vector to rotate (query or key)
+                var vec = v == 0 ? s.q : s.k  // the vector to rotate (query or key)
                 let v0 = vec[i]
-                let v1 = vec[i+1]
-                vec[i]   = v0 * fcr - v1 * fci
-                vec[i+1] = v0 * fci + v1 * fcr
+                let v1 = vec[i + 1]
+                vec[i] = v0 * fcr - v1 * fci
+                vec[i + 1] = v0 * fci + v1 * fcr
             }
         }
 
@@ -371,7 +384,10 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
             // iterate over all timesteps, including the current one
             for t in 0...pos {
                 // get the key vector for this head and at this timestep
-                let k = Array(s.key_cache[(loff + t * kv_dim + (h / kv_mul) * head_size)..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
+                let k = Array(
+                    s.key_cache[
+                        (loff + t * kv_dim + (h / kv_mul) * head_size)
+                        ..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
                 // calculate the attention score as the dot product of q and k
                 var score: Float = 0.0
                 for i in 0..<head_size {
@@ -389,7 +405,10 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
             var xb = Array(s.xb[(h * head_size)..<(h * head_size + head_size)])
             for t in 0...pos {
                 // get the value vector for this head and at this timestep
-                let v = Array(s.value_cache[(loff + t * kv_dim + (h / kv_mul) * head_size)..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
+                let v = Array(
+                    s.value_cache[
+                        (loff + t * kv_dim + (h / kv_mul) * head_size)
+                        ..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
                 // get the attention weight for this timestep
                 let a = att[t]
                 // accumulate the weighted value into xb
@@ -400,7 +419,7 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
         }
 
         // final matmul to get the output of the attention
-        matmul(&s.xb2, s.xb, Array(w.wo[(l*dim*dim)..<(l*dim*dim + dim*dim)]), dim, dim)
+        matmul(&s.xb2, s.xb, Array(w.wo[(l * dim * dim)..<(l * dim * dim + dim * dim)]), dim, dim)
 
         // residual connection back into x
         for i in 0..<dim {
@@ -408,12 +427,19 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
         }
 
         // ffn rmsnorm
-        rmsnorm(o: &s.xb, x: x, weight: Array(w.rms_ffn_weight[(l*dim)..<(l*dim + dim)]), size: dim)
+        rmsnorm(
+            o: &s.xb, x: x, weight: Array(w.rms_ffn_weight[(l * dim)..<(l * dim + dim)]), size: dim)
 
         // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
         // first calculate self.w1(x) and self.w3(x)
-        matmul(&s.hb, s.xb, Array(w.w1[(l*dim*hidden_dim)..<(l*dim*hidden_dim + dim*hidden_dim)]), dim, hidden_dim)
-        matmul(&s.hb2, s.xb, Array(w.w3[(l*dim*hidden_dim)..<(l*dim*hidden_dim + dim*hidden_dim)]), dim, hidden_dim)
+        matmul(
+            &s.hb, s.xb,
+            Array(w.w1[(l * dim * hidden_dim)..<(l * dim * hidden_dim + dim * hidden_dim)]), dim,
+            hidden_dim)
+        matmul(
+            &s.hb2, s.xb,
+            Array(w.w3[(l * dim * hidden_dim)..<(l * dim * hidden_dim + dim * hidden_dim)]), dim,
+            hidden_dim)
 
         // SwiGLU non-linearity
         for i in 0..<hidden_dim {
@@ -426,7 +452,10 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
         }
 
         // final matmul to get the output of the ffn
-        matmul(&s.xb, s.hb, Array(w.w2[(l*dim*hidden_dim)..<(l*dim*hidden_dim + hidden_dim*dim)]), hidden_dim, dim)
+        matmul(
+            &s.xb, s.hb,
+            Array(w.w2[(l * dim * hidden_dim)..<(l * dim * hidden_dim + hidden_dim * dim)]),
+            hidden_dim, dim)
 
         // residual connection
         for i in 0..<dim {
@@ -442,22 +471,21 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
     return s.logits
 }
 
-
 // ----------------------------------------------------------------------------
 // The Byte Pair Encoding (BPE) Tokenizer that translates strings <-> tokens
 
 struct TokenIndex {
     var str: String
     var id: Int
-    init(){
+    init() {
         self.str = ""
-        self.id = 0    
+        self.id = 0
     }
 
-    init(str: String, id: Int){
+    init(str: String, id: Int) {
         self.str = str
         self.id = id
-    }    
+    }
 }
 
 struct Tokenizer {
@@ -466,9 +494,9 @@ struct Tokenizer {
     var sortedVocab: [TokenIndex]
     var vocabSize: Int
     var maxTokenLength: UInt
-    var bytePieces: [UInt8] // stores all single-byte strings
+    var bytePieces: [UInt8]  // stores all single-byte strings
 
-    init(){
+    init() {
         self.vocab = []
         self.vocabScores = []
         self.sortedVocab = []
@@ -482,7 +510,7 @@ func compare_tokens(_ a: TokenIndex, _ b: TokenIndex) -> Bool {
     return a.str < b.str
 }
 
-func buildTokenizer( tokenizerPath: String, vocabSize: Int) -> Tokenizer{
+func buildTokenizer(tokenizerPath: String, vocabSize: Int) -> Tokenizer {
 
     var t = Tokenizer()
     t.vocabSize = vocabSize
@@ -496,17 +524,24 @@ func buildTokenizer( tokenizerPath: String, vocabSize: Int) -> Tokenizer{
     }
 
     do {
-        let fileData = try Data(contentsOf: URL(fileURLWithPath: tokenizerPath), options: .mappedIfSafe)
+        let fileData = try Data(
+            contentsOf: URL(fileURLWithPath: tokenizerPath), options: .mappedIfSafe)
         var readPosition = 0
 
-        t.maxTokenLength = fileData.withUnsafeBytes { $0.load(fromByteOffset: readPosition, as: UInt.self) }
+        t.maxTokenLength = fileData.withUnsafeBytes {
+            $0.load(fromByteOffset: readPosition, as: UInt.self)
+        }
         readPosition += MemoryLayout<UInt>.size
 
         for i in 0..<vocabSize {
-            t.vocabScores[i] = fileData.withUnsafeBytes { $0.load(fromByteOffset: readPosition, as: Float.self) }
+            t.vocabScores[i] = fileData.withUnsafeBytes {
+                $0.load(fromByteOffset: readPosition, as: Float.self)
+            }
             readPosition += MemoryLayout<Float>.size
 
-            let len = fileData.withUnsafeBytes { $0.load(fromByteOffset: readPosition, as: Int.self) }
+            let len = fileData.withUnsafeBytes {
+                $0.load(fromByteOffset: readPosition, as: Int.self)
+            }
             readPosition += MemoryLayout<Int>.size
 
             let tokenData = fileData.subdata(in: readPosition..<(readPosition + len))
@@ -534,34 +569,25 @@ func decode(t: inout Tokenizer, prevToken: Int, token: Int) -> String {
     // careful, some tokens designate raw bytes, and look like e.g. '<0x01>'
     // parse this and convert and return the actual byte
     if let range = piece.range(of: "<0x[0-9A-Fa-f]{2}>", options: .regularExpression),
-       let byteVal = UInt8(piece[range].dropFirst(3).dropLast(1), radix: 16) {
+        let byteVal = UInt8(piece[range].dropFirst(3).dropLast(1), radix: 16)
+    {
         piece = String(bytes: [t.bytePieces[Int(byteVal) * 2]], encoding: .utf8) ?? ""
     }
     return piece
 }
 
-//func safePrint(_ piece: UnsafePointer<CChar>?) {
-//    guard let piece = piece else { return }
-//    if piece.pointee == 0 { return }
-//    if piece.advanced(by: 1).pointee == 0 {
-//        let byteVal = UInt8(bitPattern: piece.pointee)
-//        if !(isprint(Int32(byteVal)) != 0 || isspace(Int32(byteVal)) != 0) {
-//            return
-//        }
-//    }
-//    print(String(cString: piece))
-//}
-
 func strLookup(str: String, sortedVocab: inout [TokenIndex], vocabSize: Int) -> Int {
     // efficiently find the perfect match for str in vocab, return its index or -1 if not found
-    let tok = TokenIndex(str: str, id: 0) // acts as the key to search for
+    let tok = TokenIndex(str: str, id: 0)  // acts as the key to search for
 
     let res = sortedVocab.firstIndex(where: { $0.str == tok.str })
 
     return res != nil ? sortedVocab[res!].id : -1
 }
 
-func encode(t: inout Tokenizer, text: String, bos: Int8, eos: Int8, tokens: inout [Int], n_tokens: inout Int) {
+func encode(
+    t: inout Tokenizer, text: String, bos: Int8, eos: Int8, tokens: inout [Int], n_tokens: inout Int
+) {
     if text.isEmpty {
         print("cannot encode empty text")
         exit(EXIT_FAILURE)
@@ -576,12 +602,13 @@ func encode(t: inout Tokenizer, text: String, bos: Int8, eos: Int8, tokens: inou
         t.sortedVocab.sort(by: compare_tokens)
     }
 
-    var strBuffer = Array(repeating: Character(UnicodeScalar(0)!), count: Int(t.maxTokenLength*2 + 1 + 2))
+    var strBuffer = Array(
+        repeating: Character(UnicodeScalar(0)!), count: Int(t.maxTokenLength * 2 + 1 + 2))
     var strLen = 0
 
     n_tokens = 0
 
-    if bos != 0 { 
+    if bos != 0 {
         tokens[n_tokens] = 1
         n_tokens += 1
     }
@@ -589,7 +616,7 @@ func encode(t: inout Tokenizer, text: String, bos: Int8, eos: Int8, tokens: inou
     if !text.isEmpty {
         let dummyPrefix = strLookup(str: " ", sortedVocab: &t.sortedVocab, vocabSize: t.vocabSize)
         tokens[n_tokens] = dummyPrefix
-        n_tokens+=1
+        n_tokens += 1
     }
 
     // Okay UTF-8 time. This will get messy. Here is the reference from Wikipedia:
@@ -607,34 +634,35 @@ func encode(t: inout Tokenizer, text: String, bos: Int8, eos: Int8, tokens: inou
         }
 
         strBuffer[strLen] = Character(UnicodeScalar(c))
-        strLen+=1
+        strLen += 1
         strBuffer[strLen] = Character(UnicodeScalar(0))
 
-        if (c+1 & 0xC0) == 0x80 && strLen < 4 {
+        if (c + 1 & 0xC0) == 0x80 && strLen < 4 {
             continue
         }
 
-        let id = strLookup(str: String(strBuffer[0..<strLen]), sortedVocab: &t.sortedVocab, vocabSize: t.vocabSize)
+        let id = strLookup(
+            str: String(strBuffer[0..<strLen]), sortedVocab: &t.sortedVocab, vocabSize: t.vocabSize)
 
         if id != -1 {
             tokens[n_tokens] = id
-            n_tokens+=1
+            n_tokens += 1
         } else {
             for i in 0..<strLen {
                 tokens[n_tokens] = Int(strBuffer[i].asciiValue!) + 3
-                n_tokens+=1
+                n_tokens += 1
             }
         }
         strLen = 0
     }
 
     while true {
-        var bestScore:Float = -1e10
+        var bestScore: Float = -1e10
         var bestId = -1
         var bestIdx = -1
 
-        for i in 0..<(n_tokens-1) {
-            let strBuffer = t.vocab[tokens[i]] + t.vocab[tokens[i+1]]
+        for i in 0..<(n_tokens - 1) {
+            let strBuffer = t.vocab[tokens[i]] + t.vocab[tokens[i + 1]]
             let id = strLookup(str: strBuffer, sortedVocab: &t.sortedVocab, vocabSize: t.vocabSize)
             if id != -1 && t.vocabScores[id] > bestScore {
                 bestScore = t.vocabScores[id]
@@ -648,15 +676,15 @@ func encode(t: inout Tokenizer, text: String, bos: Int8, eos: Int8, tokens: inou
         }
 
         tokens[bestIdx] = bestId
-        for i in (bestIdx+1)..<(n_tokens-1) {
-            tokens[i] = tokens[i+1]
+        for i in (bestIdx + 1)..<(n_tokens - 1) {
+            tokens[i] = tokens[i + 1]
         }
         n_tokens -= 1
     }
 
-    if eos != 0 { 
+    if eos != 0 {
         tokens[n_tokens] = 2
-        n_tokens+=1
+        n_tokens += 1
     }
 }
 
@@ -667,24 +695,24 @@ func encode(t: inout Tokenizer, text: String, bos: Int8, eos: Int8, tokens: inou
 struct ProbIndex {
     var prob: Float
     var index: Int
-    init(){
+    init() {
         self.prob = 0.0
         self.index = 0
     }
-    init(prob: Float, index: Int){
+    init(prob: Float, index: Int) {
         self.prob = prob
         self.index = index
     }
-} // struct used when sorting probabilities during top-p sampling
+}  // struct used when sorting probabilities during top-p sampling
 
 struct Sampler {
     var vocab_size: Int
-    var probindex: [ProbIndex] // buffer used in top-p sampling
+    var probindex: [ProbIndex]  // buffer used in top-p sampling
     var temperature: Float
     var topp: Float
     var rng_state: UInt64
 
-    init(){
+    init() {
         self.vocab_size = 0
         self.probindex = []
         self.temperature = 0.0
@@ -716,7 +744,7 @@ func sampleMult(probabilities: [Float], n: Int, coin: Float) -> Int {
             return i
         }
     }
-    return n - 1 // in case of rounding errors
+    return n - 1  // in case of rounding errors
 }
 
 func compare(a: UnsafeRawPointer, b: UnsafeRawPointer) -> Int {
@@ -727,7 +755,9 @@ func compare(a: UnsafeRawPointer, b: UnsafeRawPointer) -> Int {
     return 0
 }
 
-func sample_topp(probabilities: inout [Float], n: Int, topp: Float, probindex: inout [ProbIndex], coin: Float) -> Int {
+func sample_topp(
+    probabilities: inout [Float], n: Int, topp: Float, probindex: inout [ProbIndex], coin: Float
+) -> Int {
     var n0 = 0
     let cutoff = (1.0 - topp) / Float(n - 1)
     for i in 0..<n {
@@ -778,7 +808,7 @@ func randomU32(state: inout UInt64) -> UInt32 {
     state ^= state >> 12
     state ^= state << 25
     state ^= state >> 27
-    return UInt32((state * 0x2545F4914F6CDD1D) >> 32)
+    return UInt32((state * 0x2545_F491_4F6C_DD1D) >> 32)
 }
 
 func randomF32(state: inout UInt64) -> Float {
@@ -798,12 +828,13 @@ func sample(sampler: inout Sampler, logits: inout [Float]) -> Int {
         if sampler.topp <= 0 || sampler.topp >= 1 {
             next = sampleMult(probabilities: logits, n: sampler.vocab_size, coin: coin)
         } else {
-            next = sample_topp(probabilities: &logits, n: sampler.vocab_size, topp: sampler.topp, probindex: &sampler.probindex, coin: coin)
+            next = sample_topp(
+                probabilities: &logits, n: sampler.vocab_size, topp: sampler.topp,
+                probindex: &sampler.probindex, coin: coin)
         }
     }
     return next
 }
-
 
 // ----------------------------------------------------------------------------
 // utilities: time
@@ -813,20 +844,23 @@ func timeInMs() -> Int64 {
     return Int64(time * 1000)
 }
 
-
 // ----------------------------------------------------------------------------
 // generation loop
-func generate(transformer: Transformer, tokenizer: Tokenizer, sampler: inout Sampler, prompt: String?, steps: Int) {
+func generate(
+    transformer: Transformer, tokenizer: Tokenizer, sampler: inout Sampler, prompt: String?,
+    steps: Int
+) {
     let prompt = prompt ?? ""
 
     // encode the (string) prompt into tokens sequence
     var numPromptTokens = 0
-    var promptTokens = [Int](repeating: 0, count: prompt.count + 3) // +3 for '\0', ?BOS, ?EOS
-    
+    var promptTokens = [Int](repeating: 0, count: prompt.count + 3)  // +3 for '\0', ?BOS, ?EOS
 
-    var tokenizer = tokenizer // Make the 'tokenizer' parameter mutable
-    var transformer = transformer // Make the 'transformer' parameter mutable
-    encode(t: &tokenizer, text: prompt, bos: 1, eos: 0, tokens: &promptTokens, n_tokens: &numPromptTokens)
+    var tokenizer = tokenizer  // Make the 'tokenizer' parameter mutable
+    var transformer = transformer  // Make the 'transformer' parameter mutable
+    encode(
+        t: &tokenizer, text: prompt, bos: 1, eos: 0, tokens: &promptTokens,
+        n_tokens: &numPromptTokens)
     if numPromptTokens < 1 {
         print("something is wrong, expected at least 1 prompt token")
         exit(EXIT_FAILURE)
@@ -834,9 +868,9 @@ func generate(transformer: Transformer, tokenizer: Tokenizer, sampler: inout Sam
 
     // start the main loop
     var start: Int64 = 0  // used to time our code, only initialized after first iteration
-    var next: Int        // will store the next token in the sequence
-    var token = promptTokens[0] // kick off with the first token in the prompt
-    var pos = 0     // position in the sequence
+    var next: Int  // will store the next token in the sequence
+    var token = promptTokens[0]  // kick off with the first token in the prompt
+    var pos = 0  // position in the sequence
     while pos < steps {
 
         // forward the transformer to get logits for the next token
@@ -881,14 +915,16 @@ func readStdin(guide: String) -> String? {
     return buffer
 }
 
-
 // ----------------------------------------------------------------------------
 // chat loop
 // I manually inspected the tokens for a few chat conversations compared to
 // python reference and that seemed ok, but this was not thoroughly tested and
 // is not safely implemented, it's more a proof of concept atm.
 
-func chat(transformer: Transformer, tokenizer: Tokenizer, sampler: inout Sampler, cliUserPrompt: String?, cliSystemPrompt: String?, steps: Int) {
+func chat(
+    transformer: Transformer, tokenizer: Tokenizer, sampler: inout Sampler, cliUserPrompt: String?,
+    cliSystemPrompt: String?, steps: Int
+) {
     var systemPrompt = ""
     var userPrompt = ""
     var renderedPrompt = ""
@@ -900,10 +936,10 @@ func chat(transformer: Transformer, tokenizer: Tokenizer, sampler: inout Sampler
     var next: Int = 0
     var token: Int = 0
     var pos = 0
-    
-    var tokenizer = tokenizer // Make the 'tokenizer' parameter mutable
-    var transformer = transformer // Make the 'transformer' parameter mutable
- 
+
+    var tokenizer = tokenizer  // Make the 'tokenizer' parameter mutable
+    var transformer = transformer  // Make the 'transformer' parameter mutable
+
     while pos < steps {
         if userTurn {
             if pos == 0 {
@@ -925,7 +961,9 @@ func chat(transformer: Transformer, tokenizer: Tokenizer, sampler: inout Sampler
                 let userTemplate = "[INST] %@ [/INST]"
                 renderedPrompt = String(format: userTemplate, userPrompt)
             }
-            encode(t: &tokenizer, text: renderedPrompt, bos: 1, eos: 0, tokens: &promptTokens, n_tokens: &numPromptTokens)
+            encode(
+                t: &tokenizer, text: renderedPrompt, bos: 1, eos: 0, tokens: &promptTokens,
+                n_tokens: &numPromptTokens)
             userIdx = 0
             userTurn = false
             print("Assistant: ", terminator: "")
@@ -981,7 +1019,7 @@ var systemPrompt: String? = nil
 
 let args = CommandLine.arguments
 if args.count >= 2 { checkpointPath = args[1] } else { errorUsage() }
-guard let checkpointPath = checkpointPath else { 
+guard let checkpointPath = checkpointPath else {
     errorUsage()
     exit(EXIT_FAILURE)
 }
@@ -1010,14 +1048,21 @@ if steps < 0 { steps = 0 }
 var transformer = buildTransformer(checkpointPath)
 if steps == 0 || steps > transformer.config.seq_len { steps = transformer.config.seq_len }
 
-var tokenizer = buildTokenizer(tokenizerPath: tokenizerPath, vocabSize: transformer.config.vocab_size)
+var tokenizer = buildTokenizer(
+    tokenizerPath: tokenizerPath, vocabSize: transformer.config.vocab_size)
 
-var sampler = buildSampler(vocabSize:transformer.config.vocab_size, temperature:temperature, topp:topp, rngSeed:rngSeed)
+var sampler = buildSampler(
+    vocabSize: transformer.config.vocab_size, temperature: temperature, topp: topp, rngSeed: rngSeed
+)
 
 if mode == "generate" {
-    generate(transformer:transformer, tokenizer:tokenizer, sampler:&sampler, prompt:prompt, steps:steps)
+    generate(
+        transformer: transformer, tokenizer: tokenizer, sampler: &sampler, prompt: prompt,
+        steps: steps)
 } else if mode == "chat" {
-    chat(transformer:transformer, tokenizer:tokenizer, sampler:&sampler, cliUserPrompt:prompt, cliSystemPrompt:systemPrompt, steps:steps)
+    chat(
+        transformer: transformer, tokenizer: tokenizer, sampler: &sampler, cliUserPrompt: prompt,
+        cliSystemPrompt: systemPrompt, steps: steps)
 } else {
     print("unknown mode: \(mode)")
     errorUsage()
@@ -1026,4 +1071,3 @@ if mode == "generate" {
 freeSampler(sampler: &sampler)
 freeTokenizer(t: &tokenizer)
 freeTransformer(t: &transformer)
-
