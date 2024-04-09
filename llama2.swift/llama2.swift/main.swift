@@ -803,7 +803,7 @@ func randomU32(state: inout UInt64) -> UInt32 {
     state ^= state >> 12
     state ^= state << 25
     state ^= state >> 27
-    return UInt32((state * 0x2545_F491_4F6C_DD1D) >> 32)
+    return UInt32((state &* 0x2545F4914F6CDD1D) >> 32)
 }
 
 func randomF32(state: inout UInt64) -> Float {
