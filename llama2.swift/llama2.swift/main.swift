@@ -384,10 +384,7 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
             // iterate over all timesteps, including the current one
             for t in 0...pos {
                 // get the key vector for this head and at this timestep
-                let k = Array(
-                    s.key_cache[
-                        (loff + t * kv_dim + (h / kv_mul) * head_size)
-                        ..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
+                let k = Array(s.key_cache[(loff + t * kv_dim + (h / kv_mul) * head_size)..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
                 // calculate the attention score as the dot product of q and k
                 var score: Float = 0.0
                 for i in 0..<head_size {
@@ -405,10 +402,7 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
             var xb = Array(s.xb[(h * head_size)..<(h * head_size + head_size)])
             for t in 0...pos {
                 // get the value vector for this head and at this timestep
-                let v = Array(
-                    s.value_cache[
-                        (loff + t * kv_dim + (h / kv_mul) * head_size)
-                        ..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
+                let v = Array(s.value_cache[(loff + t * kv_dim + (h / kv_mul) * head_size)..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
                 // get the attention weight for this timestep
                 let a = att[t]
                 // accumulate the weighted value into xb
