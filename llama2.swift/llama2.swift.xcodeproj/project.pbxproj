@@ -8,9 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		1E5DE2912BC4180F00DD624B /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E5DE2902BC4180F00DD624B /* main.swift */; };
-		1E5DE2BE2BC4E6B600DD624B /* test.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E5DE2BD2BC4E6B600DD624B /* test.swift */; };
-		1E5DE2C12BC4E6D600DD624B /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1E5DE2C02BC4E6D600DD624B /* XCTest.framework */; };
-		1E5DE2C22BC4E6D600DD624B /* XCTest.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1E5DE2C02BC4E6D600DD624B /* XCTest.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -23,23 +20,11 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 		};
-		1E5DE2C32BC4E6D600DD624B /* Embed Frameworks */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 10;
-			files = (
-				1E5DE2C22BC4E6D600DD624B /* XCTest.framework in Embed Frameworks */,
-			);
-			name = "Embed Frameworks";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		1E5DE28D2BC4180F00DD624B /* llama2.swift */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = llama2.swift; sourceTree = BUILT_PRODUCTS_DIR; };
 		1E5DE2902BC4180F00DD624B /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
-		1E5DE2BD2BC4E6B600DD624B /* test.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = test.swift; sourceTree = "<group>"; };
 		1E5DE2C02BC4E6D600DD624B /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = Platforms/MacOSX.platform/Developer/Library/Frameworks/XCTest.framework; sourceTree = DEVELOPER_DIR; };
 /* End PBXFileReference section */
 
@@ -48,7 +33,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1E5DE2C12BC4E6D600DD624B /* XCTest.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -76,7 +60,6 @@
 			isa = PBXGroup;
 			children = (
 				1E5DE2902BC4180F00DD624B /* main.swift */,
-				1E5DE2BD2BC4E6B600DD624B /* test.swift */,
 			);
 			path = llama2.swift;
 			sourceTree = "<group>";
@@ -99,7 +82,6 @@
 				1E5DE2892BC4180F00DD624B /* Sources */,
 				1E5DE28A2BC4180F00DD624B /* Frameworks */,
 				1E5DE28B2BC4180F00DD624B /* CopyFiles */,
-				1E5DE2C32BC4E6D600DD624B /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -149,7 +131,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				1E5DE2912BC4180F00DD624B /* main.swift in Sources */,
-				1E5DE2BE2BC4E6B600DD624B /* test.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

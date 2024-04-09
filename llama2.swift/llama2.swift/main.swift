@@ -10,13 +10,13 @@ import Foundation
 // ----------------------------------------------------------------------------
 // Transformer model
 struct Config {
-    var dim: Int  // transformer dimension
-    var hidden_dim: Int  // for ffn layers
-    var n_layers: Int  // number of layers
-    var n_heads: Int  // number of query heads
-    var n_kv_heads: Int  // number of key/value heads (can be < query heads because of multiquery)
-    var vocab_size: Int  // vocabulary size, usually 256 (byte-level)
-    var seq_len: Int  // max sequence length
+    var dim: Int32  // transformer dimension
+    var hidden_dim: Int32  // for ffn layers
+    var n_layers: Int32  // number of layers
+    var n_heads: Int32  // number of query heads
+    var n_kv_heads: Int32  // number of key/value heads (can be < query heads because of multiquery)
+    var vocab_size: Int32  // vocabulary size, usually 256 (byte-level)
+    var seq_len: Int32  // max sequence length
 
     init() {
         self.dim = 0
@@ -119,17 +119,17 @@ struct Transformer {
 }
 
 func mallocRunState(s: inout RunState, p: Config) {
-    let kvDim = (p.dim * p.n_kv_heads) / p.n_heads
-    s.x = Array(repeating: 0.0, count: p.dim)
-    s.xb = Array(repeating: 0.0, count: p.dim)
-    s.xb2 = Array(repeating: 0.0, count: p.dim)
-    s.hb = Array(repeating: 0.0, count: p.hidden_dim)
-    s.hb2 = Array(repeating: 0.0, count: p.hidden_dim)
-    s.q = Array(repeating: 0.0, count: p.dim)
-    s.key_cache = Array(repeating: 0.0, count: p.n_layers * p.seq_len * kvDim)
-    s.value_cache = Array(repeating: 0.0, count: p.n_layers * p.seq_len * kvDim)
-    s.att = Array(repeating: 0.0, count: p.n_heads * p.seq_len)
-    s.logits = Array(repeating: 0.0, count: p.vocab_size)
+    let kvDim = (Int(p.dim) * Int(p.n_kv_heads)) / Int(p.n_heads)
+    s.x = Array(repeating: 0.0, count: Int(p.dim))
+    s.xb = Array(repeating: 0.0, count: Int(p.dim))
+    s.xb2 = Array(repeating: 0.0, count: Int(p.dim))
+    s.hb = Array(repeating: 0.0, count: Int(p.hidden_dim))
+    s.hb2 = Array(repeating: 0.0, count: Int(p.hidden_dim))
+    s.q = Array(repeating: 0.0, count: Int(p.dim))
+    s.key_cache = Array(repeating: 0.0, count: Int(p.n_layers) * Int(p.seq_len) * kvDim)
+    s.value_cache = Array(repeating: 0.0, count: Int(p.n_layers) * Int(p.seq_len) * kvDim)
+    s.att = Array(repeating: 0.0, count: Int(p.n_heads) * Int(p.seq_len))
+    s.logits = Array(repeating: 0.0, count: Int(p.vocab_size))
 
     // ensure all mallocs went fine
     if s.x.isEmpty || s.xb.isEmpty || s.xb2.isEmpty || s.hb.isEmpty || s.hb2.isEmpty || s.q.isEmpty
@@ -156,16 +156,16 @@ func freeRunState(s: inout RunState) {
 func memoryMapWeights(
     w: inout TransformerWeights, p: Config, ptr: inout [Float], sharedWeights: Bool
 ) {
-    let headSize = p.dim / p.n_heads
-    let nLayers = p.n_layers
-    let vocabSizeDim = p.vocab_size * p.dim
-    let nLayersDim = nLayers * p.dim
-    let nLayersDimHeads = nLayers * p.dim * (p.n_heads * headSize)
-    let nLayersDimKVHeads = nLayers * p.dim * (p.n_kv_heads * headSize)
-    let nLayersHeadsDim = nLayers * (p.n_heads * headSize) * p.dim
-    let nLayersDimHiddenDim = nLayers * p.dim * p.hidden_dim
-    let nLayersHiddenDimDim = nLayers * p.hidden_dim * p.dim
-    let seqLenHeadSize = p.seq_len * headSize / 2
+    let headSize = Int(p.dim) / Int(p.n_heads)
+    let nLayers = Int(p.n_layers)
+    let vocabSizeDim = Int(p.vocab_size) * Int(p.dim)
+    let nLayersDim = nLayers * Int(p.dim)
+    let nLayersDimHeads = nLayers * Int(p.dim) * (Int(p.n_heads) * headSize)
+    let nLayersDimKVHeads = nLayers * Int(p.dim) * (Int(p.n_kv_heads) * headSize)
+    let nLayersHeadsDim = nLayers * (Int(p.n_heads) * headSize) * Int(p.dim)
+    let nLayersDimHiddenDim = nLayers * Int(p.dim) * Int(p.hidden_dim)
+    let nLayersHiddenDimDim = nLayers * Int(p.hidden_dim) * Int(p.dim)
+    let seqLenHeadSize = Int(p.seq_len) * headSize / 2
 
     w.token_embedding_table = Array(ptr[0..<vocabSizeDim])
     ptr.removeFirst(vocabSizeDim)
@@ -197,8 +197,8 @@ func memoryMapWeights(
     w.w3 = Array(ptr[0..<nLayersDimHiddenDim])
     ptr.removeFirst(nLayersDimHiddenDim)
 
-    w.rms_final_weight = Array(ptr[0..<p.dim])
-    ptr.removeFirst(p.dim)
+    w.rms_final_weight = Array(ptr[0..<Int(p.dim)])
+    ptr.removeFirst(Int(p.dim))
 
     ptr.removeFirst(seqLenHeadSize)  // skip what used to be freq_cis_real (for RoPE)
     ptr.removeFirst(seqLenHeadSize)  // skip what used to be freq_cis_imag (for RoPE)
@@ -328,24 +328,24 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
     let w = transformer.weights
     var s = transformer.state
     var x = s.x
-    let dim = p.dim
-    let kv_dim = (p.dim * p.n_kv_heads) / p.n_heads
-    let kv_mul = p.n_heads / p.n_kv_heads  // integer multiplier of the kv sharing in multiquery
-    let hidden_dim = p.hidden_dim
-    let head_size = dim / p.n_heads
+    let dim = Int(p.dim)
+    let kv_dim = (Int(p.dim) * Int(p.n_kv_heads)) / Int(p.n_heads)
+    let kv_mul = Int(p.n_heads) / Int(p.n_kv_heads)  // integer multiplier of the kv sharing in multiquery
+    let hidden_dim = Int(p.hidden_dim)
+    let head_size = dim / Int(p.n_heads)
 
     // copy the token embedding into x
     let content_row = Array(w.token_embedding_table[(token * dim)..<(token * dim + dim)])
     x = content_row
 
     // forward all the layers
-    for l in 0..<p.n_layers {
+    for l in 0..<Int(p.n_layers) {
         // attention rmsnorm
         rmsnorm(
             o: &s.xb, x: x, weight: Array(w.rms_att_weight[(l * dim)..<(l * dim + dim)]), size: dim)
 
         // key and value point to the kv cache
-        let loff = l * p.seq_len * kv_dim  // kv cache layer offset for convenience
+        let loff = l * Int(p.seq_len) * kv_dim  // kv cache layer offset for convenience
         s.k = Array(s.key_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
         s.v = Array(s.value_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
 
@@ -376,11 +376,11 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
         }
 
         // multihead attention. iterate over all heads
-        for h in 0..<p.n_heads {
+        for h in 0..<Int(p.n_heads) {
             // get the query vector for this head
             let q = Array(s.q[(h * head_size)..<(h * head_size + head_size)])
             // attention scores for this head
-            var att = Array(s.att[(h * p.seq_len)..<(h * p.seq_len + p.seq_len)])
+            var att = Array(s.att[(h * Int(p.seq_len))..<(h * Int(p.seq_len) + Int(p.seq_len))])
             // iterate over all timesteps, including the current one
             for t in 0...pos {
                 // get the key vector for this head and at this timestep
@@ -461,7 +461,7 @@ func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
     rmsnorm(o: &x, x: x, weight: w.rms_final_weight, size: dim)
 
     // classifier into logits  //TODO:待确认
-    matmul(&s.logits, x, w.wcls ?? [], p.dim, p.vocab_size)
+    matmul(&s.logits, x, w.wcls ?? [], Int(p.dim), Int(p.vocab_size))
     return s.logits
 }
 
@@ -487,7 +487,7 @@ struct Tokenizer {
     var vocabScores: [Float]
     var sortedVocab: [TokenIndex]
     var vocabSize: Int
-    var maxTokenLength: UInt
+    var maxTokenLength: Int32
     var bytePieces: [UInt8]  // stores all single-byte strings
 
     init() {
@@ -523,9 +523,9 @@ func buildTokenizer(tokenizerPath: String, vocabSize: Int) -> Tokenizer {
         var readPosition = 0
 
         t.maxTokenLength = fileData.withUnsafeBytes {
-            $0.load(fromByteOffset: readPosition, as: UInt.self)
+            $0.load(fromByteOffset: readPosition, as: Int32.self)
         }
-        readPosition += MemoryLayout<UInt>.size
+        readPosition += MemoryLayout<Int32>.size
 
         for i in 0..<vocabSize {
             t.vocabScores[i] = fileData.withUnsafeBytes {
@@ -534,13 +534,13 @@ func buildTokenizer(tokenizerPath: String, vocabSize: Int) -> Tokenizer {
             readPosition += MemoryLayout<Float>.size
 
             let len = fileData.withUnsafeBytes {
-                $0.load(fromByteOffset: readPosition, as: Int.self)
+                $0.load(fromByteOffset: readPosition, as: Int32.self)
             }
-            readPosition += MemoryLayout<Int>.size
+            readPosition += MemoryLayout<Int32>.size
 
-            let tokenData = fileData.subdata(in: readPosition..<(readPosition + len))
+            let tokenData = fileData.subdata(in: readPosition..<(readPosition + Int(len)))
             t.vocab[i] = String(data: tokenData, encoding: .utf8) ?? ""
-            readPosition += len
+            readPosition += Int(len)
         }
     } catch {
         print("Couldn't load \(tokenizerPath)")
@@ -597,7 +597,7 @@ func encode(
     }
 
     var strBuffer = Array(
-        repeating: Character(UnicodeScalar(0)!), count: Int(t.maxTokenLength * 2 + 1 + 2))
+        repeating: Character(UnicodeScalar(0)!), count: Int(t.`maxTokenLength` * 2 + 1 + 2))
     var strLen = 0
 
     n_tokens = 0
@@ -1040,13 +1040,13 @@ if topp < 0.0 || topp > 1.0 { topp = 0.9 }
 if steps < 0 { steps = 0 }
 
 var transformer = buildTransformer(checkpointPath)
-if steps == 0 || steps > transformer.config.seq_len { steps = transformer.config.seq_len }
+if steps == 0 || steps > transformer.config.seq_len { steps = Int(transformer.config.seq_len) }
 
 var tokenizer = buildTokenizer(
-    tokenizerPath: tokenizerPath, vocabSize: transformer.config.vocab_size)
+    tokenizerPath: tokenizerPath, vocabSize: Int(transformer.config.vocab_size))
 
 var sampler = buildSampler(
-    vocabSize: transformer.config.vocab_size, temperature: temperature, topp: topp, rngSeed: rngSeed
+    vocabSize: Int(transformer.config.vocab_size), temperature: temperature, topp: topp, rngSeed: rngSeed
 )
 
 if mode == "generate" {
