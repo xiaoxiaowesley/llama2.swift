@@ -667,6 +667,14 @@ func encode(t: inout Tokenizer, text: String, bos: Int8, eos: Int8, tokens: inou
 struct ProbIndex {
     var prob: Float
     var index: Int
+    init(){
+        self.prob = 0.0
+        self.index = 0
+    }
+    init(prob: Float, index: Int){
+        self.prob = prob
+        self.index = index
+    }
 } // struct used when sorting probabilities during top-p sampling
 
 struct Sampler {
@@ -675,6 +683,14 @@ struct Sampler {
     var temperature: Float
     var topp: Float
     var rng_state: UInt64
+
+    init(){
+        self.vocab_size = 0
+        self.probindex = []
+        self.temperature = 0.0
+        self.topp = 0.0
+        self.rng_state = 0
+    }
 }
 
 func sampleArgmax(probabilities: [Float]) -> Int {
@@ -744,12 +760,14 @@ func sample_topp(probabilities: inout [Float], n: Int, topp: Float, probindex: i
     return probindex[last_idx].index
 }
 
-func buildSampler(sampler: inout Sampler, vocabSize: Int, temperature: Float, topp: Float, rngSeed: UInt64) {
+func buildSampler(vocabSize: Int, temperature: Float, topp: Float, rngSeed: UInt64) -> Sampler {
+    var sampler = Sampler()
     sampler.vocab_size = vocabSize
     sampler.temperature = temperature
     sampler.topp = topp
     sampler.rng_state = rngSeed
     sampler.probindex = Array(repeating: ProbIndex(prob: 0.0, index: 0), count: sampler.vocab_size)
+    return sampler
 }
 
 func freeSampler(sampler: inout Sampler) {
@@ -994,19 +1012,18 @@ if steps == 0 || steps > transformer.config.seq_len { steps = transformer.config
 
 var tokenizer = buildTokenizer(tokenizerPath: tokenizerPath, vocabSize: transformer.config.vocab_size)
 
-//var sampler = Sampler()
-//buildSampler(&sampler, transformer.config.vocabSize, temperature, topp, rngSeed)
-//
-//if mode == "generate" {
-//    generate(&transformer, &tokenizer, &sampler, prompt, steps)
-//} else if mode == "chat" {
-//    chat(&transformer, &tokenizer, &sampler, prompt, systemPrompt, steps)
-//} else {
-//    print("unknown mode: \(mode)")
-//    errorUsage()
-//}
-//
-//freeSampler(&sampler)
-//freeTokenizer(&tokenizer)
-//freeTransformer(&transformer)
+var sampler = buildSampler(vocabSize:transformer.config.vocab_size, temperature:temperature, topp:topp, rngSeed:rngSeed)
+
+if mode == "generate" {
+    generate(transformer:transformer, tokenizer:tokenizer, sampler:&sampler, prompt:prompt, steps:steps)
+} else if mode == "chat" {
+    chat(transformer:transformer, tokenizer:tokenizer, sampler:&sampler, cliUserPrompt:prompt, cliSystemPrompt:systemPrompt, steps:steps)
+} else {
+    print("unknown mode: \(mode)")
+    errorUsage()
+}
+
+freeSampler(sampler: &sampler)
+freeTokenizer(t: &tokenizer)
+freeTransformer(t: &transformer)
 
