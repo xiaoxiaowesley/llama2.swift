@@ -178,7 +178,7 @@ func read_checkpoint(checkpoint: String, config: inout Config, weights: inout Tr
         print("open failed!")
         exit(EXIT_FAILURE)
     }
-    var ptr = mmap(nil, file_size, PROT_READ, MAP_PRIVATE, fd, 0)
+    let ptr = mmap(nil, file_size, PROT_READ, MAP_PRIVATE, fd, 0)
     guard ptr != nil else {
         print("mmap failed!")
         exit(EXIT_FAILURE)
@@ -188,6 +188,398 @@ func read_checkpoint(checkpoint: String, config: inout Config, weights: inout Tr
     var weights_array = Array(UnsafeBufferPointer(start: weights_ptr, count: file_size / MemoryLayout<Float>.size))
     memoryMapWeights(w: &weights, p: config, ptr: &weights_array, sharedWeights: shared_weights == 1)
 }
+
+func buildTransformer(t: inout Transformer, checkpointPath: String) {
+    // read in the Config and the Weights from the checkpoint
+    read_checkpoint(checkpoint: checkpointPath, config: &t.config, weights: &t.weights, fd: &t.fd, data: &t.data, file_size: &t.fileSize)
+    // allocate the RunState buffers
+    mallocRunState(s: &t.state, p: t.config)
+}
+
+func freeTransformer(t: inout Transformer) {
+    // close the memory mapping
+    if t.data != nil {
+        munmap(t.data, t.fileSize)
+        t.data = nil
+    }
+    if t.fd != -1 {
+        close(t.fd)
+        t.fd = -1
+    }
+    // free the RunState buffers
+    freeRunState(s: &t.state)
+}
+
+// ----------------------------------------------------------------------------
+// neural net blocks; the dynamics of the Transformer
+
+func rmsnorm(o: inout [Float], x: [Float], weight: [Float], size: Int) {
+    // calculate sum of squares
+    var ss: Float = 0.0
+    for j in 0..<size {
+        ss += x[j] * x[j]
+    }
+    ss /= Float(size)
+    ss += 1e-5
+    ss = 1.0 / sqrt(ss)
+    // normalize and scale
+    for j in 0..<size {
+        o[j] = weight[j] * (ss * x[j])
+    }
+}
+
+func softmax(_ x: inout [Float]) {
+    // find max value (for numerical stability)
+    let maxVal = x.max() ?? 0.0
+
+    // exp and sum
+    var sum: Float = 0.0
+    for i in 0..<x.count {
+        x[i] = exp(x[i] - maxVal)
+        sum += x[i]
+    }
+
+    // normalize
+    for i in 0..<x.count {
+        x[i] /= sum
+    }
+}
+
+func matmul(_ xout: inout [Float], _ x: [Float], _ w: [Float], _ n: Int, _ d: Int) {
+    // W (d,n) @ x (n,) -> xout (d,)
+    // by far the most amount of time is spent inside this little function
+    DispatchQueue.concurrentPerform(iterations: d) { i in
+        var val: Float = 0.0
+        for j in 0..<n {
+            val += w[i * n + j] * x[j]
+        }
+        xout[i] = val
+    }
+}
+
+func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
+    // a few convenience variables
+    let p = transformer.config
+    let w = transformer.weights
+    var s = transformer.state
+    var x = s.x
+    let dim = p.dim
+    let kv_dim = (p.dim * p.n_kv_heads) / p.n_heads
+    let kv_mul = p.n_heads / p.n_kv_heads // integer multiplier of the kv sharing in multiquery
+    let hidden_dim =  p.hidden_dim
+    let head_size = dim / p.n_heads
+
+    // copy the token embedding into x
+    let content_row = Array(w.token_embedding_table[(token * dim)..<(token * dim + dim)])
+    x = content_row
+
+    // forward all the layers
+    for l in 0..<p.n_layers {
+        // attention rmsnorm
+        rmsnorm(o: &s.xb, x: x, weight: Array(w.rms_att_weight[(l*dim)..<(l*dim + dim)]), size: dim)
+
+        // key and value point to the kv cache
+        let loff = l * p.seq_len * kv_dim // kv cache layer offset for convenience
+        s.k = Array(s.key_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
+        s.v = Array(s.value_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
+
+        // qkv matmuls for this position
+        matmul(&s.q, s.xb, Array(w.wq[(l*dim*dim)..<(l*dim*dim + dim*dim)]), dim, dim)
+        matmul(&s.k, s.xb, Array(w.wk[(l*dim*kv_dim)..<(l*dim*kv_dim + dim*kv_dim)]), dim, kv_dim)
+        matmul(&s.v, s.xb, Array(w.wv[(l*dim*kv_dim)..<(l*dim*kv_dim + dim*kv_dim)]), dim, kv_dim)
+
+        // RoPE relative positional encoding: complex-valued rotate q and k in each head
+        for i in stride(from: 0, to: dim, by: 2) {
+            let head_dim = i % head_size
+            let freq = 1.0 / pow(10000.0, Float(head_dim) / Float(head_size))
+            let val = Float(pos) * freq
+            let fcr = cos(val)
+            let fci = sin(val)
+            let rotn = i < kv_dim ? 2 : 1 // how many vectors? 2 = q & k, 1 = q only
+            for v in 0..<rotn {
+                var vec = v == 0 ? s.q : s.k // the vector to rotate (query or key)
+                let v0 = vec[i]
+                let v1 = vec[i+1]
+                vec[i]   = v0 * fcr - v1 * fci
+                vec[i+1] = v0 * fci + v1 * fcr
+            }
+        }
+
+        // multihead attention. iterate over all heads
+        for h in 0..<p.n_heads {
+            // get the query vector for this head
+            let q = Array(s.q[(h * head_size)..<(h * head_size + head_size)])
+            // attention scores for this head
+            var att = Array(s.att[(h * p.seq_len)..<(h * p.seq_len + p.seq_len)])
+            // iterate over all timesteps, including the current one
+            for t in 0...pos {
+                // get the key vector for this head and at this timestep
+                let k = Array(s.key_cache[(loff + t * kv_dim + (h / kv_mul) * head_size)..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
+                // calculate the attention score as the dot product of q and k
+                var score: Float = 0.0
+                for i in 0..<head_size {
+                    score += q[i] * k[i]
+                }
+                score /= sqrt(Float(head_size))
+                // save the score to the attention buffer
+                att[t] = score
+            }
+
+            // softmax the scores to get attention weights, from 0..pos inclusively
+            softmax(&att)
+
+            // weighted sum of the values, store back into xb
+            var xb = Array(s.xb[(h * head_size)..<(h * head_size + head_size)])
+            for t in 0...pos {
+                // get the value vector for this head and at this timestep
+                let v = Array(s.value_cache[(loff + t * kv_dim + (h / kv_mul) * head_size)..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
+                // get the attention weight for this timestep
+                let a = att[t]
+                // accumulate the weighted value into xb
+                for i in 0..<head_size {
+                    xb[i] += a * v[i]
+                }
+            }
+        }
+
+        // final matmul to get the output of the attention
+        matmul(&s.xb2, s.xb, Array(w.wo[(l*dim*dim)..<(l*dim*dim + dim*dim)]), dim, dim)
+
+        // residual connection back into x
+        for i in 0..<dim {
+            x[i] += s.xb2[i]
+        }
+
+        // ffn rmsnorm
+        rmsnorm(o: &s.xb, x: x, weight: Array(w.rms_ffn_weight[(l*dim)..<(l*dim + dim)]), size: dim)
+
+        // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
+        // first calculate self.w1(x) and self.w3(x)
+        matmul(&s.hb, s.xb, Array(w.w1[(l*dim*hidden_dim)..<(l*dim*hidden_dim + dim*hidden_dim)]), dim, hidden_dim)
+        matmul(&s.hb2, s.xb, Array(w.w3[(l*dim*hidden_dim)..<(l*dim*hidden_dim + dim*hidden_dim)]), dim, hidden_dim)
+
+        // SwiGLU non-linearity
+        for i in 0..<hidden_dim {
+            var val = s.hb[i]
+            // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
+            val *= (1.0 / (1.0 + exp(-val)))
+            // elementwise multiply with w3(x)
+            val *= s.hb2[i]
+            s.hb[i] = val
+        }
+
+        // final matmul to get the output of the ffn
+        matmul(&s.xb, s.hb, Array(w.w2[(l*dim*hidden_dim)..<(l*dim*hidden_dim + hidden_dim*dim)]), hidden_dim, dim)
+
+        // residual connection
+        for i in 0..<dim {
+            x[i] += s.xb[i]
+        }
+    }
+
+    // final rmsnorm
+    rmsnorm(o: &x, x: x, weight: w.rms_final_weight, size: dim)
+
+    // classifier into logits  //TODO:待确认
+    matmul(&s.logits, x, w.wcls ?? [], p.dim, p.vocab_size)
+    return s.logits
+}
+
+
+// ----------------------------------------------------------------------------
+// The Byte Pair Encoding (BPE) Tokenizer that translates strings <-> tokens
+
+struct TokenIndex {
+    var str: String
+    var id: Int
+}
+
+struct Tokenizer {
+    var vocab: [String]
+    var vocabScores: [Float]
+    var sortedVocab: [TokenIndex]
+    var vocabSize: Int
+    var maxTokenLength: UInt
+    var bytePieces: [UInt8] // stores all single-byte strings
+}
+
+func compare_tokens(_ a: TokenIndex, _ b: TokenIndex) -> Bool {
+    return a.str < b.str
+}
+
+func buildTokenizer(t: inout Tokenizer, tokenizerPath: String, vocabSize: Int) {
+    t.vocabSize = vocabSize
+    t.vocab = [String](repeating: "", count: vocabSize)
+    t.vocabScores = [Float](repeating: 0.0, count: vocabSize)
+    t.sortedVocab = []
+
+    for i in 0..<256 {
+        t.bytePieces[i * 2] = UInt8(i)
+        t.bytePieces[i * 2 + 1] = 0
+    }
+
+    do {
+        let fileData = try Data(contentsOf: URL(fileURLWithPath: tokenizerPath), options: .mappedIfSafe)
+        var readPosition = 0
+
+        t.maxTokenLength = fileData.withUnsafeBytes { $0.load(fromByteOffset: readPosition, as: UInt.self) }
+        readPosition += MemoryLayout<UInt>.size
+
+        for i in 0..<vocabSize {
+            t.vocabScores[i] = fileData.withUnsafeBytes { $0.load(fromByteOffset: readPosition, as: Float.self) }
+            readPosition += MemoryLayout<Float>.size
+
+            let len = fileData.withUnsafeBytes { $0.load(fromByteOffset: readPosition, as: Int.self) }
+            readPosition += MemoryLayout<Int>.size
+
+            let tokenData = fileData.subdata(in: readPosition..<(readPosition + len))
+            t.vocab[i] = String(data: tokenData, encoding: .utf8) ?? ""
+            readPosition += len
+        }
+    } catch {
+        print("Couldn't load \(tokenizerPath)")
+        exit(EXIT_FAILURE)
+    }
+}
+
+func freeTokenizer(t: inout Tokenizer) {
+    t.vocab.removeAll()
+    t.vocabScores.removeAll()
+    t.sortedVocab.removeAll()
+}
+func decode(t: inout Tokenizer, prevToken: Int, token: Int) -> String {
+    var piece = t.vocab[token]
+    // following BOS (1) token, sentencepiece decoder strips any leading whitespace (see PR #89)
+    if prevToken == 1 && piece.first == " " { piece.removeFirst() }
+    // careful, some tokens designate raw bytes, and look like e.g. '<0x01>'
+    // parse this and convert and return the actual byte
+    if let range = piece.range(of: "<0x[0-9A-Fa-f]{2}>", options: .regularExpression),
+       let byteVal = UInt8(piece[range].dropFirst(3).dropLast(1), radix: 16) {
+        piece = String(bytes: [t.bytePieces[Int(byteVal) * 2]], encoding: .utf8) ?? ""
+    }
+    return piece
+}
+
+func safePrint(_ piece: UnsafePointer<CChar>?) {
+    guard let piece = piece else { return }
+    if piece.pointee == 0 { return }
+    if piece.advanced(by: 1).pointee == 0 {
+        let byteVal = UInt8(bitPattern: piece.pointee)
+        if !(isprint(Int32(byteVal)) != 0 || isspace(Int32(byteVal)) != 0) {
+            return
+        }
+    }
+    print(String(cString: piece))
+}
+
+func strLookup(str: String, sortedVocab: inout [TokenIndex], vocabSize: Int) -> Int {
+    // efficiently find the perfect match for str in vocab, return its index or -1 if not found
+    let tok = TokenIndex(str: str, id: 0) // acts as the key to search for
+
+    let res = sortedVocab.firstIndex(where: { $0.str == tok.str })
+
+    return res != nil ? sortedVocab[res!].id : -1
+}
+
+func encode(t: inout Tokenizer, text: String, bos: Int8, eos: Int8, tokens: inout [Int], n_tokens: inout Int) {
+    if text.isEmpty {
+        print("cannot encode empty text")
+        exit(EXIT_FAILURE)
+    }
+
+    if t.sortedVocab.isEmpty {
+        t.sortedVocab = Array(repeating: TokenIndex(str: "", id: 0), count: t.vocabSize)
+        for i in 0..<t.vocabSize {
+            t.sortedVocab[i].str = t.vocab[i]
+            t.sortedVocab[i].id = i
+        }
+        t.sortedVocab.sort(by: compare_tokens)
+    }
+
+    var strBuffer = Array(repeating: Character(UnicodeScalar(0)!), count: Int(t.maxTokenLength*2 + 1 + 2))
+    var strLen = 0
+
+    n_tokens = 0
+
+    if bos != 0 { 
+        tokens[n_tokens] = 1
+        n_tokens += 1
+    }
+
+    if !text.isEmpty {
+        let dummyPrefix = strLookup(str: " ", sortedVocab: &t.sortedVocab, vocabSize: t.vocabSize)
+        tokens[n_tokens] = dummyPrefix
+        n_tokens+=1
+    }
+
+    // Okay UTF-8 time. This will get messy. Here is the reference from Wikipedia:
+    // Code point ↔ UTF-8 conversion
+    // First code point    Last code point    Byte 1    Byte 2    Byte 3    Byte 4
+    // U+0000    U+007F        0xxxxxxx
+    // U+0080    U+07FF        110xxxxx    10xxxxxx
+    // U+0800    U+FFFF        1110xxxx    10xxxxxx    10xxxxxx
+    // U+10000    U+10FFFF    11110xxx    10xxxxxx    10xxxxxx    10xxxxxx
+
+    // process the raw (UTF-8) byte sequence of the input string
+    for c in text.utf8 {
+        if c & 0xC0 != 0x80 {
+            strLen = 0
+        }
+
+        strBuffer[strLen] = Character(UnicodeScalar(c))
+        strLen+=1
+        strBuffer[strLen] = Character(UnicodeScalar(0))
+
+        if (c+1 & 0xC0) == 0x80 && strLen < 4 {
+            continue
+        }
+
+        let id = strLookup(str: String(strBuffer[0..<strLen]), sortedVocab: &t.sortedVocab, vocabSize: t.vocabSize)
+
+        if id != -1 {
+            tokens[n_tokens] = id
+            n_tokens+=1
+        } else {
+            for i in 0..<strLen {
+                tokens[n_tokens] = Int(strBuffer[i].asciiValue!) + 3
+                n_tokens+=1
+            }
+        }
+        strLen = 0
+    }
+
+    while true {
+        var bestScore:Float = -1e10
+        var bestId = -1
+        var bestIdx = -1
+
+        for i in 0..<(n_tokens-1) {
+            let strBuffer = t.vocab[tokens[i]] + t.vocab[tokens[i+1]]
+            let id = strLookup(str: strBuffer, sortedVocab: &t.sortedVocab, vocabSize: t.vocabSize)
+            if id != -1 && t.vocabScores[id] > bestScore {
+                bestScore = t.vocabScores[id]
+                bestId = id
+                bestIdx = i
+            }
+        }
+
+        if bestIdx == -1 {
+            break
+        }
+
+        tokens[bestIdx] = bestId
+        for i in (bestIdx+1)..<(n_tokens-1) {
+            tokens[i] = tokens[i+1]
+        }
+        n_tokens -= 1
+    }
+
+    if eos != 0 { 
+        tokens[n_tokens] = 2
+        n_tokens+=1
+    }
+}
+
 
 print("Hello, World!")
 
