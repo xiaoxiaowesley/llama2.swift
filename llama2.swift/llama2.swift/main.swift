@@ -586,11 +586,6 @@ func strLookup(str: String, sortedVocab: inout [TokenIndex], vocabSize: Int) -> 
 func encode(
     t: inout Tokenizer, text: String, bos: Int8, eos: Int8, tokens: inout [Int], n_tokens: inout Int
 ) {
-    if text.isEmpty {
-        print("cannot encode empty text")
-        exit(EXIT_FAILURE)
-    }
-
     if t.sortedVocab.isEmpty {
         t.sortedVocab = Array(repeating: TokenIndex(str: "", id: 0), count: t.vocabSize)
         for i in 0..<t.vocabSize {
