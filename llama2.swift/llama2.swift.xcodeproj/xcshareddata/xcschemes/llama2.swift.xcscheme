@@ -53,11 +53,19 @@
       </BuildableProductRunnable>
       <CommandLineArguments>
          <CommandLineArgument
-            argument = "/Users/xiaoxiang/Documents/github/llama2.swift/llama2.swift/llama2.swift/stories15M.bin  -t 0.8 -n 256 -m chat"
+            argument = "/Users/xiaoxiang/Documents/work/harmonyos/demos/llama2.c/stories42M.bin"
+            isEnabled = "YES">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "-t 0 -n 256 -m generate"
             isEnabled = "YES">
          </CommandLineArgument>
          <CommandLineArgument
             argument = "-z /Users/xiaoxiang/Documents/github/llama2.swift/llama2.swift/llama2.swift/tokenizer.bin "
+            isEnabled = "YES">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "-s 1712645977"
             isEnabled = "YES">
          </CommandLineArgument>
       </CommandLineArguments>

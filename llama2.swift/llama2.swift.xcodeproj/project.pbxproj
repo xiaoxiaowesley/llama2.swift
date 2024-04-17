@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1E5DE2912BC4180F00DD624B /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E5DE2902BC4180F00DD624B /* main.swift */; };
+		1ECE4F8E2BCFD37C00853124 /* run.c in Sources */ = {isa = PBXBuildFile; fileRef = 1ECE4F8D2BCFD37C00853124 /* run.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -26,6 +27,9 @@
 		1E5DE28D2BC4180F00DD624B /* llama2.swift */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = llama2.swift; sourceTree = BUILT_PRODUCTS_DIR; };
 		1E5DE2902BC4180F00DD624B /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		1E5DE2C02BC4E6D600DD624B /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = Platforms/MacOSX.platform/Developer/Library/Frameworks/XCTest.framework; sourceTree = DEVELOPER_DIR; };
+		1EC648112BC7B6CF007CC1FE /* llama2.swift-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "llama2.swift-Bridging-Header.h"; sourceTree = "<group>"; };
+		1ECE4F8C2BCFD37C00853124 /* run.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = run.h; sourceTree = "<group>"; };
+		1ECE4F8D2BCFD37C00853124 /* run.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = run.c; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -60,6 +64,9 @@
 			isa = PBXGroup;
 			children = (
 				1E5DE2902BC4180F00DD624B /* main.swift */,
+				1EC648112BC7B6CF007CC1FE /* llama2.swift-Bridging-Header.h */,
+				1ECE4F8C2BCFD37C00853124 /* run.h */,
+				1ECE4F8D2BCFD37C00853124 /* run.c */,
 			);
 			path = llama2.swift;
 			sourceTree = "<group>";
@@ -104,6 +111,7 @@
 				TargetAttributes = {
 					1E5DE28C2BC4180F00DD624B = {
 						CreatedOnToolsVersion = 15.3;
+						LastSwiftMigration = 1530;
 					};
 				};
 			};
@@ -130,6 +138,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1ECE4F8E2BCFD37C00853124 /* run.c in Sources */,
 				1E5DE2912BC4180F00DD624B /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -258,8 +267,11 @@
 		1E5DE2952BC4180F00DD624B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_OBJC_BRIDGING_HEADER = "llama2.swift/llama2.swift-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -267,8 +279,10 @@
 		1E5DE2962BC4180F00DD624B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_OBJC_BRIDGING_HEADER = "llama2.swift/llama2.swift-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
