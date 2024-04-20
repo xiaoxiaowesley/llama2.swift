@@ -1115,21 +1115,29 @@ if rngSeed <= 0 { rngSeed = UInt64(Date().timeIntervalSince1970) }
 if temperature < 0.0 { temperature = 0.0 }
 if topp < 0.0 || topp > 1.0 { topp = 0.9 }
 if steps < 0 { steps = 0 }
-//
-//var transformer = buildTransformer(checkpointPath)
-//if steps == 0 || steps > transformer.config.seq_len { steps = Int(transformer.config.seq_len) }
-//
-//var tokenizer = buildTokenizer(
-//    tokenizerPath: tokenizerPath, vocabSize: Int(transformer.config.vocab_size))
-//
-//var sampler = buildSampler(
-//    vocabSize: Int(transformer.config.vocab_size), temperature: temperature, topp: topp, rngSeed: rngSeed
-//)
-//
+
+var transformer = Transformer()
+
+if var cString = checkpointPath.cString(using: .utf8) {
+    cString.withUnsafeMutableBufferPointer { buffer in
+        build_transformer(&transformer, buffer.baseAddress)
+    }
+}
+
+if steps == 0 || steps > transformer.config.seq_len { steps = Int(transformer.config.seq_len) }
+
+var tokenizer = Tokenizer()
+if var cString = tokenizerPath.cString(using: .utf8) {
+    cString.withUnsafeMutableBufferPointer { buffer in
+        build_tokenizer(&tokenizer, buffer.baseAddress, transformer.config.vocab_size)
+    }
+}
+
+var sampler = Sampler()
+build_sampler(&sampler, transformer.config.vocab_size, temperature, topp, rngSeed);
+
 if mode == "generate" {
-//    generate(
-//        transformer: transformer, tokenizer: tokenizer, sampler: &sampler, prompt: prompt,
-//        steps: steps)
+    generate(&transformer, &tokenizer, &sampler, nil, Int32(steps));
 } else if mode == "chat" {
 //    chat(
 //        transformer: transformer, tokenizer: tokenizer, sampler: &sampler, cliUserPrompt: prompt,
