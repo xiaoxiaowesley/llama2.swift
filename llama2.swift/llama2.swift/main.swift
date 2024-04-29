@@ -277,21 +277,21 @@ import Foundation
 
 // ----------------------------------------------------------------------------
 // neural net blocks; the dynamics of the Transformer
-
-func rmsnorm(o: inout [Float], x: [Float], weight: [Float], size: Int) {
-    // calculate sum of squares
-    var ss: Float = 0.0
-    for j in 0..<size {
-        ss += x[j] * x[j]
-    }
-    ss /= Float(size)
-    ss += 1e-5
-    ss = 1.0 / sqrt(ss)
-    // normalize and scale
-    for j in 0..<size {
-        o[j] = weight[j] * (ss * x[j])
-    }
-}
+//
+//func rmsnorm(o: inout [Float], x: [Float], weight: [Float], size: Int) {
+//    // calculate sum of squares
+//    var ss: Float = 0.0
+//    for j in 0..<size {
+//        ss += x[j] * x[j]
+//    }
+//    ss /= Float(size)
+//    ss += 1e-5
+//    ss = 1.0 / sqrt(ss)
+//    // normalize and scale
+//    for j in 0..<size {
+//        o[j] = weight[j] * (ss * x[j])
+//    }
+//}
 
 func softmax(_ x: inout [Float]) {
     // find max value (for numerical stability)
@@ -310,20 +310,20 @@ func softmax(_ x: inout [Float]) {
     }
 }
 
- func matmul(_ xout: inout [Float], _ x: [Float], _ w: [Float], _ n: Int, _ d: Int) {
-    // W (d,n) @ x (n,) -> xout (d,)
-    // by far the most amount of time is spent inside this little function
-    let lock = NSLock()
-    DispatchQueue.concurrentPerform(iterations: d) { i in
-        var val: Float = 0.0
-        for j in 0..<n {
-            val += w[i * n + j] * x[j]
-        }
-        lock.lock()
-        xout[i] = val
-        lock.unlock()
-    }
-}
+// func matmul(_ xout: inout [Float], _ x: [Float], _ w: [Float], _ n: Int, _ d: Int) {
+//    // W (d,n) @ x (n,) -> xout (d,)
+//    // by far the most amount of time is spent inside this little function
+//    let lock = NSLock()
+//    DispatchQueue.concurrentPerform(iterations: d) { i in
+//        var val: Float = 0.0
+//        for j in 0..<n {
+//            val += w[i * n + j] * x[j]
+//        }
+//        lock.lock()
+//        xout[i] = val
+//        lock.unlock()
+//    }
+//}
 
 //func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
 //    // a few convenience variables
@@ -838,10 +838,161 @@ func timeInMs() -> Int64 {
     return Int64(time * 1000)
 }
 
+// transform 前向传播
 func myForward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
-    var logits: [Float] = []
-    var ptr = forward(&transformer, Int32(token), Int32(pos))
+    
+    /// 开始
+    var p: Config = transformer.config
+    // 存储一个Transformer模型中所有权重参数
+    var w: TransformerWeights = transformer.weights
+    // 存储一个Transformer模型中所有状态参数。
+    var s: RunState = transformer.state
+    // 这是一个Transformer模型的输入，是一个长度为dim的向量
+    var x = s.x
+    var dim = p.dim
+    // 这是多头注意力机制的维度
+    var kv_dim = (p.dim * p.n_kv_heads) / p.n_heads
+    var kv_mul = p.n_heads / p.n_kv_heads
+    var hidden_dim = p.hidden_dim
+    var head_size = dim / p.n_heads
+    
+    // copy the token embedding into x
+    
+    var content_row = w.token_embedding_table + token * Int(dim)
+    memcpy(x,content_row,Int(dim) * MemoryLayout<Float>.size)
+    
+    for l in 0..<Int(p.n_layers) {
+        // attention rmsnorm
+        rmsnorm( s.xb,  x, w.rms_att_weight + l * Int(dim), Int32(Int(dim)))
+
+        // key and value point to the kv cache
+        var loff = Int(l) * Int(p.seq_len) * Int(kv_dim)
+        s.k = s.key_cache + loff + pos * Int(kv_dim)
+        s.v = s.value_cache + loff + pos * Int(kv_dim) 
+
+        // qkv matmuls for this position
+        matmul(s.q, x, w.wq + l * Int(dim) * Int(dim), Int32(dim), Int32(dim))
+        matmul(s.k, x, w.wk + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
+        matmul(s.v, x, w.wv + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
+
+        // RoPE relative positional encoding: complex-valued rotate q and k in each head
+        for i in stride(from: 0, to: Int(dim), by: 2) {
+            let head_dim = i % Int(head_size)
+            let freq = 1.0 / pow(10000.0, Float(head_dim) / Float(head_size))
+            let val = Float(pos) * freq
+            let fcr = cos(val)
+            let fci = sin(val)
+            let rotn = i < Int(kv_dim) ? 2 : 1  // how many vectors? 2 = q & k, 1 = q only
+            for v in 0..<rotn {
+                var vec = v == 0 ? s.q : s.k  // the vector to rotate (query or key)
+                if var vec = vec {
+                    let v0 = vec[i]
+                    let v1 = vec[i + 1]
+                    vec[i] = v0 * fcr - v1 * fci
+                    vec[i + 1] = v0 * fci + v1 * fcr
+                }
+            }
+        }
+
+        // multihead attention. iterate over all heads
+        var h = 0
+        // 遍历所有的头
+        for h in 0..<Int(p.n_heads) {
+            // get the query vector for this head
+            let q = s.q + h * Int(head_size)
+            // attention scores for this head
+            var att = s.att + h * Int(p.seq_len)
+            // iterate over all timesteps, including the current one
+            var t = 0
+            for t in 0...pos {
+                // get the key vector for this head and at this timestep
+                let h_devide_km_mul : Int = h/Int(kv_mul)
+                let k = s.key_cache + loff + Int(t * Int(kv_dim)) + h/Int(kv_mul) * Int(head_size)
+                // calculate the attention score as the dot product of q and k
+                var score: Float = 0.0
+                var i = 0
+                for i in 0..<Int(head_size) {
+                    score += q[i] * k[i]
+                }
+                score /= sqrt(Float(head_size))
+                // save the score to the attention buffer
+                att[t] = score
+            }
+
+            // softmax the scores to get attention weights, from 0..pos inclusively
+            softmax(att,Int32(pos + 1))
+
+            // weighted sum of the values, store back into xb
+            var xb = s.xb + h * Int(head_size)
+            for t in 0...pos {
+                // get the value vector for this head and at this timestep
+                let v = s.value_cache + loff + t * Int(kv_dim) + h / Int(kv_mul) * Int(head_size)
+                // get the attention weight for this timestep
+                let a = att[t]
+                // accumulate the weighted value into xb
+                var i = 0
+                for i in 0..<Int(head_size) {
+                    xb[i] += a * v[i]
+                }
+            }
+        }
+
+        // final matmul to get the output of the attention
+        matmul(s.xb2, s.xb, w.wo + l * Int(dim) * Int(dim), Int32(dim), Int32(dim))
+        // residual connection back into x
+        var i = 0
+        for i in 0..<Int(dim) {
+            if let x = x {
+                x[i] += s.xb2[i]
+            }
+        }
+        // ffn rmsnorm
+        rmsnorm(s.xb, x, w.rms_ffn_weight + l * Int(dim), Int32(dim))
+
+
+        // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
+        // first calculate self.w1(x) and self.w3(x)
+        matmul(s.hb, s.xb, w.w1 + l * Int(dim) * Int(hidden_dim), Int32(dim), Int32(hidden_dim))
+        matmul(s.hb2, s.xb, w.w3 + l * Int(dim) * Int(hidden_dim), Int32(dim), Int32(hidden_dim))
+       
+        // SwiGLU non-linearity
+        for i in 0..<Int(hidden_dim) {
+            var val = s.hb[i]
+            // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
+            val *= (1.0 / (1.0 + exp(-val)))
+            // elementwise multiply with w3(x)
+            val *= s.hb2[i]
+            s.hb[i] = val
+        }
+
+        // final matmul to get the output of the ffn
+        matmul(s.xb, s.hb, w.w2 + l * Int(dim) * Int(hidden_dim), Int32(hidden_dim), Int32(dim))
+
+        // residual connection
+        for i in 0..<Int(dim) {
+            if let x = x {
+                x[i] += s.xb[i]
+            }
+        }
+
+    }
+
+    // final rmsnorm
+    rmsnorm(x, x, w.rms_final_weight, Int32(dim))
+
+    // classifier into logits  //TODO:待确认
+    matmul(s.logits, x, w.wcls, Int32(p.dim), Int32(p.vocab_size))
+
+    // forward all the layers
+    // for循环遍历p.n_layers
+    
+    /// 结束
+    
     // ptr 是float*指针，是一个地址，需要转换为数组
+    var logits: [Float] = []
+//    var ptr = s.logits
+    var ptr = forward(&transformer, Int32(token), Int32(pos))
+ 
     for i in 0..<Int(transformer.config.vocab_size) {
         logits.append(ptr![i])
     }

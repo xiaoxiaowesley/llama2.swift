@@ -90,6 +90,8 @@ void build_transformer(Transformer *t, char* checkpoint_path) ;
 
 void free_transformer(Transformer* t) ;
 
-
+void rmsnorm(float* o, float* x, float* weight, int size);
+void matmul(float* xout, float* x, float* w, int n, int d);
+void softmax(float* x, int size);
 float* forward(Transformer* transformer, int token, int pos);
 #endif
