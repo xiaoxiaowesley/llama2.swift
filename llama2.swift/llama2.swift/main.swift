@@ -838,6 +838,16 @@ func timeInMs() -> Int64 {
     return Int64(time * 1000)
 }
 
+func myForward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
+    var logits: [Float] = []
+    var ptr = forward(&transformer, Int32(token), Int32(pos))
+    // ptr 是float*指针，是一个地址，需要转换为数组
+    for i in 0..<Int(transformer.config.vocab_size) {
+        logits.append(ptr![i])
+    }
+    return logits
+}
+
 // ----------------------------------------------------------------------------
 // generation loop
 func generate(
@@ -869,13 +879,8 @@ func generate(
 
         // forward the transformer to get logits for the next token
 //        var logits = forward(transformer: &transformer, token: token, pos: pos)
-        
-        var logits: [Float] = []
-        var ptr = forward(&transformer, Int32(token), Int32(pos))
-        // ptr 是float*指针，是一个地址，需要转换为数组
-        for i in 0..<Int(transformer.config.vocab_size) {
-            logits.append(ptr![i])
-        }
+
+        var logits = myForward(transformer: &transformer, token: token, pos: pos)
 
         // advance the state machine
         if pos < numPromptTokens - 1 {
