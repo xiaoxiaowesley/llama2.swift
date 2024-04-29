@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1E5DE2912BC4180F00DD624B /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E5DE2902BC4180F00DD624B /* main.swift */; };
+		1E71CC622BDF8812001CD23F /* llama_swift.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E71CC612BDF8812001CD23F /* llama_swift.swift */; };
 		1ECE4F8E2BCFD37C00853124 /* run.c in Sources */ = {isa = PBXBuildFile; fileRef = 1ECE4F8D2BCFD37C00853124 /* run.c */; };
 /* End PBXBuildFile section */
 
@@ -27,6 +28,7 @@
 		1E5DE28D2BC4180F00DD624B /* llama2.swift */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = llama2.swift; sourceTree = BUILT_PRODUCTS_DIR; };
 		1E5DE2902BC4180F00DD624B /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		1E5DE2C02BC4E6D600DD624B /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = Platforms/MacOSX.platform/Developer/Library/Frameworks/XCTest.framework; sourceTree = DEVELOPER_DIR; };
+		1E71CC612BDF8812001CD23F /* llama_swift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = llama_swift.swift; sourceTree = "<group>"; };
 		1EC648112BC7B6CF007CC1FE /* llama2.swift-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "llama2.swift-Bridging-Header.h"; sourceTree = "<group>"; };
 		1ECE4F8C2BCFD37C00853124 /* run.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = run.h; sourceTree = "<group>"; };
 		1ECE4F8D2BCFD37C00853124 /* run.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = run.c; sourceTree = "<group>"; };
@@ -67,6 +69,7 @@
 				1EC648112BC7B6CF007CC1FE /* llama2.swift-Bridging-Header.h */,
 				1ECE4F8C2BCFD37C00853124 /* run.h */,
 				1ECE4F8D2BCFD37C00853124 /* run.c */,
+				1E71CC612BDF8812001CD23F /* llama_swift.swift */,
 			);
 			path = llama2.swift;
 			sourceTree = "<group>";
@@ -139,6 +142,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1ECE4F8E2BCFD37C00853124 /* run.c in Sources */,
+				1E71CC622BDF8812001CD23F /* llama_swift.swift in Sources */,
 				1E5DE2912BC4180F00DD624B /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

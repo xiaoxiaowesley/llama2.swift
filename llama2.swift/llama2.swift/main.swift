@@ -1137,7 +1137,10 @@ var sampler = Sampler()
 build_sampler(&sampler, transformer.config.vocab_size, temperature, topp, rngSeed);
 
 if mode == "generate" {
-    generate(&transformer, &tokenizer, &sampler, nil, Int32(steps));
+//    generate(&transformer, &tokenizer, &sampler, nil, Int32(steps));
+    Generate(&transformer, &tokenizer, &sampler, nil, steps);
+    
+    
 } else if mode == "chat" {
 //    chat(
 //        transformer: transformer, tokenizer: tokenizer, sampler: &sampler, cliUserPrompt: prompt,
