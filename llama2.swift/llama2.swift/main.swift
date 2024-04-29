@@ -9,271 +9,271 @@ import Foundation
 
 // ----------------------------------------------------------------------------
 // Transformer model
-struct Config {
-    var dim: Int32  // transformer dimension
-    var hidden_dim: Int32  // for ffn layers
-    var n_layers: Int32  // number of layers
-    var n_heads: Int32  // number of query heads
-    var n_kv_heads: Int32  // number of key/value heads (can be < query heads because of multiquery)
-    var vocab_size: Int32  // vocabulary size, usually 256 (byte-level)
-    var seq_len: Int32  // max sequence length
-
-    init() {
-        self.dim = 0
-        self.hidden_dim = 0
-        self.n_layers = 0
-        self.n_heads = 0
-        self.n_kv_heads = 0
-        self.vocab_size = 0
-        self.seq_len = 0
-    }
-}
-
-struct TransformerWeights {
-    // token embedding table
-    var token_embedding_table: [Float]  // (vocab_size, dim)
-    // weights for rmsnorms
-    var rms_att_weight: [Float]  // (layer, dim) rmsnorm weights
-    var rms_ffn_weight: [Float]  // (layer, dim)
-    // weights for matmuls. note dim == n_heads * head_size
-    var wq: [Float]  // (layer, dim, n_heads * head_size)
-    var wk: [Float]  // (layer, dim, n_kv_heads * head_size)
-    var wv: [Float]  // (layer, dim, n_kv_heads * head_size)
-    var wo: [Float]  // (layer, n_heads * head_size, dim)
-    // weights for ffn
-    var w1: [Float]  // (layer, hidden_dim, dim)
-    var w2: [Float]  // (layer, dim, hidden_dim)
-    var w3: [Float]  // (layer, hidden_dim, dim)
-    // final rmsnorm
-    var rms_final_weight: [Float]  // (dim,)
-    // (optional) classifier weights for the logits, on the last layer
-    var wcls: [Float]?
-
-    init() {
-        self.token_embedding_table = []
-        self.rms_att_weight = []
-        self.rms_ffn_weight = []
-        self.wq = []
-        self.wk = []
-        self.wv = []
-        self.wo = []
-        self.w1 = []
-        self.w2 = []
-        self.w3 = []
-        self.rms_final_weight = []
-        self.wcls = []
-
-    }
-}
-
-struct RunState {
-    // current wave of activations
-    var x: [Float]  // activation at current time stamp (dim,)
-    var xb: [Float]  // same, but inside a residual branch (dim,)
-    var xb2: [Float]  // an additional buffer just for convenience (dim,)
-    var hb: [Float]  // buffer for hidden dimension in the ffn (hidden_dim,)
-    var hb2: [Float]  // buffer for hidden dimension in the ffn (hidden_dim,)
-    var q: [Float]  // query (dim,)
-    var k: [Float]  // key (dim,)
-    var v: [Float]  // value (dim,)
-    var att: [Float]  // buffer for scores/attention values (n_heads, seq_len)
-    var logits: [Float]  // output logits
-    // kv cache
-    var key_cache: [Float]  // (layer, seq_len, dim)
-    var value_cache: [Float]  // (layer, seq_len, dim)
-
-    //constructor
-    init() {
-        self.x = []
-        self.xb = []
-        self.xb2 = []
-        self.hb = []
-        self.hb2 = []
-        self.q = []
-        self.k = []
-        self.v = []
-        self.att = []
-        self.logits = []
-        self.key_cache = []
-        self.value_cache = []
-    }
-}
-
-struct Transformer {
-    var config: Config  // the hyperparameters of the architecture (the blueprint)
-    var weights: TransformerWeights  // the weights of the model
-    var state: RunState  // buffers for the "wave" of activations in the forward pass
-    var fd: Int32  // file descriptor for memory mapping
-    var data: UnsafeMutablePointer<Float>?  // memory mapped data pointer
-    var fileSize: Int  // size of the checkpoint file in bytes
-
-    //constructor
-    init() {
-        self.config = Config()
-        self.weights = TransformerWeights()
-        self.state = RunState()
-        self.fd = 0
-        self.data = nil
-        self.fileSize = 0
-    }
-}
-
-func mallocRunState(s: inout RunState, p: Config) {
-    let kvDim = (Int(p.dim) * Int(p.n_kv_heads)) / Int(p.n_heads)
-    s.x = Array(repeating: 0.0, count: Int(p.dim))
-    s.xb = Array(repeating: 0.0, count: Int(p.dim))
-    s.xb2 = Array(repeating: 0.0, count: Int(p.dim))
-    s.hb = Array(repeating: 0.0, count: Int(p.hidden_dim))
-    s.hb2 = Array(repeating: 0.0, count: Int(p.hidden_dim))
-    s.q = Array(repeating: 0.0, count: Int(p.dim))
-    s.key_cache = Array(repeating: 0.0, count: Int(p.n_layers) * Int(p.seq_len) * kvDim)
-    s.value_cache = Array(repeating: 0.0, count: Int(p.n_layers) * Int(p.seq_len) * kvDim)
-    s.att = Array(repeating: 0.0, count: Int(p.n_heads) * Int(p.seq_len))
-    s.logits = Array(repeating: 0.0, count: Int(p.vocab_size))
-
-    // ensure all mallocs went fine
-    if s.x.isEmpty || s.xb.isEmpty || s.xb2.isEmpty || s.hb.isEmpty || s.hb2.isEmpty || s.q.isEmpty
-        || s.key_cache.isEmpty || s.value_cache.isEmpty || s.att.isEmpty || s.logits.isEmpty
-    {
-        print("malloc failed!")
-        exit(EXIT_FAILURE)
-    }
-}
-
-func freeRunState(s: inout RunState) {
-    s.x.removeAll()
-    s.xb.removeAll()
-    s.xb2.removeAll()
-    s.hb.removeAll()
-    s.hb2.removeAll()
-    s.q.removeAll()
-    s.att.removeAll()
-    s.logits.removeAll()
-    s.key_cache.removeAll()
-    s.value_cache.removeAll()
-}
-
-func memoryMapWeights(
-    w: inout TransformerWeights, p: Config, ptr: inout [Float], sharedWeights: Bool
-) {
-    let headSize = Int(p.dim) / Int(p.n_heads)
-    let nLayers = Int(p.n_layers)
-    let vocabSizeDim = Int(p.vocab_size) * Int(p.dim)
-    let nLayersDim = nLayers * Int(p.dim)
-    let nLayersDimHeads = nLayers * Int(p.dim) * (Int(p.n_heads) * headSize)
-    let nLayersDimKVHeads = nLayers * Int(p.dim) * (Int(p.n_kv_heads) * headSize)
-    let nLayersHeadsDim = nLayers * (Int(p.n_heads) * headSize) * Int(p.dim)
-    let nLayersDimHiddenDim = nLayers * Int(p.dim) * Int(p.hidden_dim)
-    let nLayersHiddenDimDim = nLayers * Int(p.hidden_dim) * Int(p.dim)
-    let seqLenHeadSize = Int(p.seq_len) * headSize / 2
-
-    w.token_embedding_table = Array(ptr[0..<vocabSizeDim])
-    ptr.removeFirst(vocabSizeDim)
-
-    w.rms_att_weight = Array(ptr[0..<nLayersDim])
-    ptr.removeFirst(nLayersDim)
-
-    w.wq = Array(ptr[0..<nLayersDimHeads])
-    ptr.removeFirst(nLayersDimHeads)
-
-    w.wk = Array(ptr[0..<nLayersDimKVHeads])
-    ptr.removeFirst(nLayersDimKVHeads)
-
-    w.wv = Array(ptr[0..<nLayersDimKVHeads])
-    ptr.removeFirst(nLayersDimKVHeads)
-
-    w.wo = Array(ptr[0..<nLayersHeadsDim])
-    ptr.removeFirst(nLayersHeadsDim)
-
-    w.rms_ffn_weight = Array(ptr[0..<nLayersDim])
-    ptr.removeFirst(nLayersDim)
-
-    w.w1 = Array(ptr[0..<nLayersDimHiddenDim])
-    ptr.removeFirst(nLayersDimHiddenDim)
-
-    w.w2 = Array(ptr[0..<nLayersHiddenDimDim])
-    ptr.removeFirst(nLayersHiddenDimDim)
-
-    w.w3 = Array(ptr[0..<nLayersDimHiddenDim])
-    ptr.removeFirst(nLayersDimHiddenDim)
-
-    w.rms_final_weight = Array(ptr[0..<Int(p.dim)])
-    ptr.removeFirst(Int(p.dim))
-
-    ptr.removeFirst(seqLenHeadSize)  // skip what used to be freq_cis_real (for RoPE)
-    ptr.removeFirst(seqLenHeadSize)  // skip what used to be freq_cis_imag (for RoPE)
-
-    w.wcls = sharedWeights ? w.token_embedding_table : Array(ptr)
-}
-
-func read_checkpoint(
-    checkpoint: String, config: inout Config, weights: inout TransformerWeights, fd: inout Int32,
-    data: inout UnsafeMutablePointer<Float>?, file_size: inout Int
-) {
-    guard let file = fopen(checkpoint, "rb") else {
-        print("Couldn't open file \(checkpoint)")
-        exit(EXIT_FAILURE)
-    }
-
-    // read in the config header
-    if fread(&config, MemoryLayout<Config>.size, 1, file) != 1 {
-        exit(EXIT_FAILURE)
-    }
-
-    // negative vocab size is hacky way of signaling unshared weights. bit yikes.
-    let shared_weights = config.vocab_size > 0 ? 1 : 0
-    config.vocab_size = abs(config.vocab_size)
-
-    // figure out the file size
-    fseek(file, 0, SEEK_END)  // move file pointer to end of file
-    file_size = ftell(file)  // get the file size, in bytes
-    fclose(file)
-
-    // memory map the Transformer weights into the data pointer
-    fd = open(checkpoint, O_RDONLY)  // open in read only mode
-    if fd == -1 {
-        print("open failed!")
-        exit(EXIT_FAILURE)
-    }
-    let ptr = mmap(nil, file_size, PROT_READ, MAP_PRIVATE, fd, 0)
-    guard ptr != nil else {
-        print("mmap failed!")
-        exit(EXIT_FAILURE)
-    }
-    data = ptr!.assumingMemoryBound(to: Float.self)
-    let weights_ptr = data!.advanced(by: MemoryLayout<Config>.size / MemoryLayout<Float>.size)
-    var weights_array = Array(
-        UnsafeBufferPointer(start: weights_ptr, count: file_size / MemoryLayout<Float>.size))
-    memoryMapWeights(
-        w: &weights, p: config, ptr: &weights_array, sharedWeights: shared_weights == 1)
-}
-
-func buildTransformer(_ checkpointPath: String) -> Transformer {
-    var t: Transformer = Transformer()
-
-    // read in the Config and the Weights from the checkpoint
-    read_checkpoint(
-        checkpoint: checkpointPath, config: &t.config, weights: &t.weights, fd: &t.fd,
-        data: &t.data, file_size: &t.fileSize)
-    // allocate the RunState buffers
-    mallocRunState(s: &t.state, p: t.config)
-
-    return t
-}
-
-func freeTransformer(t: inout Transformer) {
-    // close the memory mapping
-    if t.data != nil {
-        munmap(t.data, t.fileSize)
-        t.data = nil
-    }
-    if t.fd != -1 {
-        close(t.fd)
-        t.fd = -1
-    }
-    // free the RunState buffers
-    freeRunState(s: &t.state)
-}
+//struct Config {
+//    var dim: Int32  // transformer dimension
+//    var hidden_dim: Int32  // for ffn layers
+//    var n_layers: Int32  // number of layers
+//    var n_heads: Int32  // number of query heads
+//    var n_kv_heads: Int32  // number of key/value heads (can be < query heads because of multiquery)
+//    var vocab_size: Int32  // vocabulary size, usually 256 (byte-level)
+//    var seq_len: Int32  // max sequence length
+//
+//    init() {
+//        self.dim = 0
+//        self.hidden_dim = 0
+//        self.n_layers = 0
+//        self.n_heads = 0
+//        self.n_kv_heads = 0
+//        self.vocab_size = 0
+//        self.seq_len = 0
+//    }
+//}
+//
+//struct TransformerWeights {
+//    // token embedding table
+//    var token_embedding_table: [Float]  // (vocab_size, dim)
+//    // weights for rmsnorms
+//    var rms_att_weight: [Float]  // (layer, dim) rmsnorm weights
+//    var rms_ffn_weight: [Float]  // (layer, dim)
+//    // weights for matmuls. note dim == n_heads * head_size
+//    var wq: [Float]  // (layer, dim, n_heads * head_size)
+//    var wk: [Float]  // (layer, dim, n_kv_heads * head_size)
+//    var wv: [Float]  // (layer, dim, n_kv_heads * head_size)
+//    var wo: [Float]  // (layer, n_heads * head_size, dim)
+//    // weights for ffn
+//    var w1: [Float]  // (layer, hidden_dim, dim)
+//    var w2: [Float]  // (layer, dim, hidden_dim)
+//    var w3: [Float]  // (layer, hidden_dim, dim)
+//    // final rmsnorm
+//    var rms_final_weight: [Float]  // (dim,)
+//    // (optional) classifier weights for the logits, on the last layer
+//    var wcls: [Float]?
+//
+//    init() {
+//        self.token_embedding_table = []
+//        self.rms_att_weight = []
+//        self.rms_ffn_weight = []
+//        self.wq = []
+//        self.wk = []
+//        self.wv = []
+//        self.wo = []
+//        self.w1 = []
+//        self.w2 = []
+//        self.w3 = []
+//        self.rms_final_weight = []
+//        self.wcls = []
+//
+//    }
+//}
+//
+//struct RunState {
+//    // current wave of activations
+//    var x: [Float]  // activation at current time stamp (dim,)
+//    var xb: [Float]  // same, but inside a residual branch (dim,)
+//    var xb2: [Float]  // an additional buffer just for convenience (dim,)
+//    var hb: [Float]  // buffer for hidden dimension in the ffn (hidden_dim,)
+//    var hb2: [Float]  // buffer for hidden dimension in the ffn (hidden_dim,)
+//    var q: [Float]  // query (dim,)
+//    var k: [Float]  // key (dim,)
+//    var v: [Float]  // value (dim,)
+//    var att: [Float]  // buffer for scores/attention values (n_heads, seq_len)
+//    var logits: [Float]  // output logits
+//    // kv cache
+//    var key_cache: [Float]  // (layer, seq_len, dim)
+//    var value_cache: [Float]  // (layer, seq_len, dim)
+//
+//    //constructor
+//    init() {
+//        self.x = []
+//        self.xb = []
+//        self.xb2 = []
+//        self.hb = []
+//        self.hb2 = []
+//        self.q = []
+//        self.k = []
+//        self.v = []
+//        self.att = []
+//        self.logits = []
+//        self.key_cache = []
+//        self.value_cache = []
+//    }
+//}
+//
+//struct Transformer {
+//    var config: Config  // the hyperparameters of the architecture (the blueprint)
+//    var weights: TransformerWeights  // the weights of the model
+//    var state: RunState  // buffers for the "wave" of activations in the forward pass
+//    var fd: Int32  // file descriptor for memory mapping
+//    var data: UnsafeMutablePointer<Float>?  // memory mapped data pointer
+//    var fileSize: Int  // size of the checkpoint file in bytes
+//
+//    //constructor
+//    init() {
+//        self.config = Config()
+//        self.weights = TransformerWeights()
+//        self.state = RunState()
+//        self.fd = 0
+//        self.data = nil
+//        self.fileSize = 0
+//    }
+//}
+//
+//func mallocRunState(s: inout RunState, p: Config) {
+//    let kvDim = (Int(p.dim) * Int(p.n_kv_heads)) / Int(p.n_heads)
+//    s.x = Array(repeating: 0.0, count: Int(p.dim))
+//    s.xb = Array(repeating: 0.0, count: Int(p.dim))
+//    s.xb2 = Array(repeating: 0.0, count: Int(p.dim))
+//    s.hb = Array(repeating: 0.0, count: Int(p.hidden_dim))
+//    s.hb2 = Array(repeating: 0.0, count: Int(p.hidden_dim))
+//    s.q = Array(repeating: 0.0, count: Int(p.dim))
+//    s.key_cache = Array(repeating: 0.0, count: Int(p.n_layers) * Int(p.seq_len) * kvDim)
+//    s.value_cache = Array(repeating: 0.0, count: Int(p.n_layers) * Int(p.seq_len) * kvDim)
+//    s.att = Array(repeating: 0.0, count: Int(p.n_heads) * Int(p.seq_len))
+//    s.logits = Array(repeating: 0.0, count: Int(p.vocab_size))
+//
+//    // ensure all mallocs went fine
+//    if s.x.isEmpty || s.xb.isEmpty || s.xb2.isEmpty || s.hb.isEmpty || s.hb2.isEmpty || s.q.isEmpty
+//        || s.key_cache.isEmpty || s.value_cache.isEmpty || s.att.isEmpty || s.logits.isEmpty
+//    {
+//        print("malloc failed!")
+//        exit(EXIT_FAILURE)
+//    }
+//}
+//
+//func freeRunState(s: inout RunState) {
+//    s.x.removeAll()
+//    s.xb.removeAll()
+//    s.xb2.removeAll()
+//    s.hb.removeAll()
+//    s.hb2.removeAll()
+//    s.q.removeAll()
+//    s.att.removeAll()
+//    s.logits.removeAll()
+//    s.key_cache.removeAll()
+//    s.value_cache.removeAll()
+//}
+//
+//func memoryMapWeights(
+//    w: inout TransformerWeights, p: Config, ptr: inout [Float], sharedWeights: Bool
+//) {
+//    let headSize = Int(p.dim) / Int(p.n_heads)
+//    let nLayers = Int(p.n_layers)
+//    let vocabSizeDim = Int(p.vocab_size) * Int(p.dim)
+//    let nLayersDim = nLayers * Int(p.dim)
+//    let nLayersDimHeads = nLayers * Int(p.dim) * (Int(p.n_heads) * headSize)
+//    let nLayersDimKVHeads = nLayers * Int(p.dim) * (Int(p.n_kv_heads) * headSize)
+//    let nLayersHeadsDim = nLayers * (Int(p.n_heads) * headSize) * Int(p.dim)
+//    let nLayersDimHiddenDim = nLayers * Int(p.dim) * Int(p.hidden_dim)
+//    let nLayersHiddenDimDim = nLayers * Int(p.hidden_dim) * Int(p.dim)
+//    let seqLenHeadSize = Int(p.seq_len) * headSize / 2
+//
+//    w.token_embedding_table = Array(ptr[0..<vocabSizeDim])
+//    ptr.removeFirst(vocabSizeDim)
+//
+//    w.rms_att_weight = Array(ptr[0..<nLayersDim])
+//    ptr.removeFirst(nLayersDim)
+//
+//    w.wq = Array(ptr[0..<nLayersDimHeads])
+//    ptr.removeFirst(nLayersDimHeads)
+//
+//    w.wk = Array(ptr[0..<nLayersDimKVHeads])
+//    ptr.removeFirst(nLayersDimKVHeads)
+//
+//    w.wv = Array(ptr[0..<nLayersDimKVHeads])
+//    ptr.removeFirst(nLayersDimKVHeads)
+//
+//    w.wo = Array(ptr[0..<nLayersHeadsDim])
+//    ptr.removeFirst(nLayersHeadsDim)
+//
+//    w.rms_ffn_weight = Array(ptr[0..<nLayersDim])
+//    ptr.removeFirst(nLayersDim)
+//
+//    w.w1 = Array(ptr[0..<nLayersDimHiddenDim])
+//    ptr.removeFirst(nLayersDimHiddenDim)
+//
+//    w.w2 = Array(ptr[0..<nLayersHiddenDimDim])
+//    ptr.removeFirst(nLayersHiddenDimDim)
+//
+//    w.w3 = Array(ptr[0..<nLayersDimHiddenDim])
+//    ptr.removeFirst(nLayersDimHiddenDim)
+//
+//    w.rms_final_weight = Array(ptr[0..<Int(p.dim)])
+//    ptr.removeFirst(Int(p.dim))
+//
+//    ptr.removeFirst(seqLenHeadSize)  // skip what used to be freq_cis_real (for RoPE)
+//    ptr.removeFirst(seqLenHeadSize)  // skip what used to be freq_cis_imag (for RoPE)
+//
+//    w.wcls = sharedWeights ? w.token_embedding_table : Array(ptr)
+//}
+//
+//func read_checkpoint(
+//    checkpoint: String, config: inout Config, weights: inout TransformerWeights, fd: inout Int32,
+//    data: inout UnsafeMutablePointer<Float>?, file_size: inout Int
+//) {
+//    guard let file = fopen(checkpoint, "rb") else {
+//        print("Couldn't open file \(checkpoint)")
+//        exit(EXIT_FAILURE)
+//    }
+//
+//    // read in the config header
+//    if fread(&config, MemoryLayout<Config>.size, 1, file) != 1 {
+//        exit(EXIT_FAILURE)
+//    }
+//
+//    // negative vocab size is hacky way of signaling unshared weights. bit yikes.
+//    let shared_weights = config.vocab_size > 0 ? 1 : 0
+//    config.vocab_size = abs(config.vocab_size)
+//
+//    // figure out the file size
+//    fseek(file, 0, SEEK_END)  // move file pointer to end of file
+//    file_size = ftell(file)  // get the file size, in bytes
+//    fclose(file)
+//
+//    // memory map the Transformer weights into the data pointer
+//    fd = open(checkpoint, O_RDONLY)  // open in read only mode
+//    if fd == -1 {
+//        print("open failed!")
+//        exit(EXIT_FAILURE)
+//    }
+//    let ptr = mmap(nil, file_size, PROT_READ, MAP_PRIVATE, fd, 0)
+//    guard ptr != nil else {
+//        print("mmap failed!")
+//        exit(EXIT_FAILURE)
+//    }
+//    data = ptr!.assumingMemoryBound(to: Float.self)
+//    let weights_ptr = data!.advanced(by: MemoryLayout<Config>.size / MemoryLayout<Float>.size)
+//    var weights_array = Array(
+//        UnsafeBufferPointer(start: weights_ptr, count: file_size / MemoryLayout<Float>.size))
+//    memoryMapWeights(
+//        w: &weights, p: config, ptr: &weights_array, sharedWeights: shared_weights == 1)
+//}
+//
+//func buildTransformer(_ checkpointPath: String) -> Transformer {
+//    var t: Transformer = Transformer()
+//
+//    // read in the Config and the Weights from the checkpoint
+//    read_checkpoint(
+//        checkpoint: checkpointPath, config: &t.config, weights: &t.weights, fd: &t.fd,
+//        data: &t.data, file_size: &t.fileSize)
+//    // allocate the RunState buffers
+//    mallocRunState(s: &t.state, p: t.config)
+//
+//    return t
+//}
+//
+//func freeTransformer(t: inout Transformer) {
+//    // close the memory mapping
+//    if t.data != nil {
+//        munmap(t.data, t.fileSize)
+//        t.data = nil
+//    }
+//    if t.fd != -1 {
+//        close(t.fd)
+//        t.fd = -1
+//    }
+//    // free the RunState buffers
+//    freeRunState(s: &t.state)
+//}
 
 // ----------------------------------------------------------------------------
 // neural net blocks; the dynamics of the Transformer
@@ -325,148 +325,148 @@ func softmax(_ x: inout [Float]) {
     }
 }
 
-func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
-    // a few convenience variables
-    let p = transformer.config
-    let w = transformer.weights
-    var s = transformer.state
-    var x = s.x
-    let dim = Int(p.dim)
-    let kv_dim = (Int(p.dim) * Int(p.n_kv_heads)) / Int(p.n_heads)
-    let kv_mul = Int(p.n_heads) / Int(p.n_kv_heads)  // integer multiplier of the kv sharing in multiquery
-    let hidden_dim = Int(p.hidden_dim)
-    let head_size = dim / Int(p.n_heads)
-
-    // copy the token embedding into x
-    let content_row = Array(w.token_embedding_table[(token * dim)..<(token * dim + dim)])
-    x = content_row
-
-    // forward all the layers
-    for l in 0..<Int(p.n_layers) {
-        // attention rmsnorm
-        rmsnorm(
-            o: &s.xb, x: x, weight: Array(w.rms_att_weight[(l * dim)..<(l * dim + dim)]), size: dim)
-
-        // key and value point to the kv cache
-        let loff = l * Int(p.seq_len) * kv_dim  // kv cache layer offset for convenience
-        s.k = Array(s.key_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
-        s.v = Array(s.value_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
-
-        // qkv matmuls for this position
-        matmul(&s.q, s.xb, Array(w.wq[(l * dim * dim)..<(l * dim * dim + dim * dim)]), dim, dim)
-        matmul(
-            &s.k, s.xb, Array(w.wk[(l * dim * kv_dim)..<(l * dim * kv_dim + dim * kv_dim)]), dim,
-            kv_dim)
-        matmul(
-            &s.v, s.xb, Array(w.wv[(l * dim * kv_dim)..<(l * dim * kv_dim + dim * kv_dim)]), dim,
-            kv_dim)
-
-        // RoPE relative positional encoding: complex-valued rotate q and k in each head
-        for i in stride(from: 0, to: dim, by: 2) {
-            let head_dim = i % head_size
-            let freq = 1.0 / pow(10000.0, Float(head_dim) / Float(head_size))
-            let val = Float(pos) * freq
-            let fcr = cos(val)
-            let fci = sin(val)
-            let rotn = i < kv_dim ? 2 : 1  // how many vectors? 2 = q & k, 1 = q only
-            for v in 0..<rotn {
-                var vec = v == 0 ? s.q : s.k  // the vector to rotate (query or key)
-                let v0 = vec[i]
-                let v1 = vec[i + 1]
-                vec[i] = v0 * fcr - v1 * fci
-                vec[i + 1] = v0 * fci + v1 * fcr
-            }
-        }
-
-        // multihead attention. iterate over all heads
-        for h in 0..<Int(p.n_heads) {
-            // get the query vector for this head
-            let q = Array(s.q[(h * head_size)..<(h * head_size + head_size)])
-            // attention scores for this head
-            var att = Array(s.att[(h * Int(p.seq_len))..<(h * Int(p.seq_len) + Int(p.seq_len))])
-            // iterate over all timesteps, including the current one
-            for t in 0...pos {
-                // get the key vector for this head and at this timestep
-                let k = Array(s.key_cache[(loff + t * kv_dim + (h / kv_mul) * head_size)..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
-                // calculate the attention score as the dot product of q and k
-                var score: Float = 0.0
-                for i in 0..<head_size {
-                    score += q[i] * k[i]
-                }
-                score /= sqrt(Float(head_size))
-                // save the score to the attention buffer
-                att[t] = score
-            }
-
-            // softmax the scores to get attention weights, from 0..pos inclusively
-            softmax(&att)
-
-            // weighted sum of the values, store back into xb
-            var xb = Array(s.xb[(h * head_size)..<(h * head_size + head_size)])
-            for t in 0...pos {
-                // get the value vector for this head and at this timestep
-                let v = Array(s.value_cache[(loff + t * kv_dim + (h / kv_mul) * head_size)..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
-                // get the attention weight for this timestep
-                let a = att[t]
-                // accumulate the weighted value into xb
-                for i in 0..<head_size {
-                    xb[i] += a * v[i]
-                }
-            }
-        }
-
-        // final matmul to get the output of the attention
-        matmul(&s.xb2, s.xb, Array(w.wo[(l * dim * dim)..<(l * dim * dim + dim * dim)]), dim, dim)
-
-        // residual connection back into x
-        for i in 0..<dim {
-            x[i] += s.xb2[i]
-        }
-
-        // ffn rmsnorm
-        rmsnorm(
-            o: &s.xb, x: x, weight: Array(w.rms_ffn_weight[(l * dim)..<(l * dim + dim)]), size: dim)
-
-        // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
-        // first calculate self.w1(x) and self.w3(x)
-        matmul(
-            &s.hb, s.xb,
-            Array(w.w1[(l * dim * hidden_dim)..<(l * dim * hidden_dim + dim * hidden_dim)]), dim,
-            hidden_dim)
-        matmul(
-            &s.hb2, s.xb,
-            Array(w.w3[(l * dim * hidden_dim)..<(l * dim * hidden_dim + dim * hidden_dim)]), dim,
-            hidden_dim)
-
-        // SwiGLU non-linearity
-        for i in 0..<hidden_dim {
-            var val = s.hb[i]
-            // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
-            val *= (1.0 / (1.0 + exp(-val)))
-            // elementwise multiply with w3(x)
-            val *= s.hb2[i]
-            s.hb[i] = val
-        }
-
-        // final matmul to get the output of the ffn
-        matmul(
-            &s.xb, s.hb,
-            Array(w.w2[(l * dim * hidden_dim)..<(l * dim * hidden_dim + hidden_dim * dim)]),
-            hidden_dim, dim)
-
-        // residual connection
-        for i in 0..<dim {
-            x[i] += s.xb[i]
-        }
-    }
-
-    // final rmsnorm
-    rmsnorm(o: &x, x: x, weight: w.rms_final_weight, size: dim)
-
-    // classifier into logits  //TODO:待确认
-    matmul(&s.logits, x, w.wcls ?? [], Int(p.dim), Int(p.vocab_size))
-    return s.logits
-}
+//func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
+//    // a few convenience variables
+//    let p = transformer.config
+//    let w = transformer.weights
+//    var s = transformer.state
+//    var x = s.x
+//    let dim = Int(p.dim)
+//    let kv_dim = (Int(p.dim) * Int(p.n_kv_heads)) / Int(p.n_heads)
+//    let kv_mul = Int(p.n_heads) / Int(p.n_kv_heads)  // integer multiplier of the kv sharing in multiquery
+//    let hidden_dim = Int(p.hidden_dim)
+//    let head_size = dim / Int(p.n_heads)
+//
+//    // copy the token embedding into x
+//    let content_row = Array(w.token_embedding_table[(token * dim)..<(token * dim + dim)])
+//    x = content_row
+//
+//    // forward all the layers
+//    for l in 0..<Int(p.n_layers) {
+//        // attention rmsnorm
+//        rmsnorm(
+//            o: &s.xb, x: x, weight: Array(w.rms_att_weight[(l * dim)..<(l * dim + dim)]), size: dim)
+//
+//        // key and value point to the kv cache
+//        let loff = l * Int(p.seq_len) * kv_dim  // kv cache layer offset for convenience
+//        s.k = Array(s.key_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
+//        s.v = Array(s.value_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
+//
+//        // qkv matmuls for this position
+//        matmul(&s.q, s.xb, Array(w.wq[(l * dim * dim)..<(l * dim * dim + dim * dim)]), dim, dim)
+//        matmul(
+//            &s.k, s.xb, Array(w.wk[(l * dim * kv_dim)..<(l * dim * kv_dim + dim * kv_dim)]), dim,
+//            kv_dim)
+//        matmul(
+//            &s.v, s.xb, Array(w.wv[(l * dim * kv_dim)..<(l * dim * kv_dim + dim * kv_dim)]), dim,
+//            kv_dim)
+//
+//        // RoPE relative positional encoding: complex-valued rotate q and k in each head
+//        for i in stride(from: 0, to: dim, by: 2) {
+//            let head_dim = i % head_size
+//            let freq = 1.0 / pow(10000.0, Float(head_dim) / Float(head_size))
+//            let val = Float(pos) * freq
+//            let fcr = cos(val)
+//            let fci = sin(val)
+//            let rotn = i < kv_dim ? 2 : 1  // how many vectors? 2 = q & k, 1 = q only
+//            for v in 0..<rotn {
+//                var vec = v == 0 ? s.q : s.k  // the vector to rotate (query or key)
+//                let v0 = vec[i]
+//                let v1 = vec[i + 1]
+//                vec[i] = v0 * fcr - v1 * fci
+//                vec[i + 1] = v0 * fci + v1 * fcr
+//            }
+//        }
+//
+//        // multihead attention. iterate over all heads
+//        for h in 0..<Int(p.n_heads) {
+//            // get the query vector for this head
+//            let q = Array(s.q[(h * head_size)..<(h * head_size + head_size)])
+//            // attention scores for this head
+//            var att = Array(s.att[(h * Int(p.seq_len))..<(h * Int(p.seq_len) + Int(p.seq_len))])
+//            // iterate over all timesteps, including the current one
+//            for t in 0...pos {
+//                // get the key vector for this head and at this timestep
+//                let k = Array(s.key_cache[(loff + t * kv_dim + (h / kv_mul) * head_size)..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
+//                // calculate the attention score as the dot product of q and k
+//                var score: Float = 0.0
+//                for i in 0..<head_size {
+//                    score += q[i] * k[i]
+//                }
+//                score /= sqrt(Float(head_size))
+//                // save the score to the attention buffer
+//                att[t] = score
+//            }
+//
+//            // softmax the scores to get attention weights, from 0..pos inclusively
+//            softmax(&att)
+//
+//            // weighted sum of the values, store back into xb
+//            var xb = Array(s.xb[(h * head_size)..<(h * head_size + head_size)])
+//            for t in 0...pos {
+//                // get the value vector for this head and at this timestep
+//                let v = Array(s.value_cache[(loff + t * kv_dim + (h / kv_mul) * head_size)..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
+//                // get the attention weight for this timestep
+//                let a = att[t]
+//                // accumulate the weighted value into xb
+//                for i in 0..<head_size {
+//                    xb[i] += a * v[i]
+//                }
+//            }
+//        }
+//
+//        // final matmul to get the output of the attention
+//        matmul(&s.xb2, s.xb, Array(w.wo[(l * dim * dim)..<(l * dim * dim + dim * dim)]), dim, dim)
+//
+//        // residual connection back into x
+//        for i in 0..<dim {
+//            x[i] += s.xb2[i]
+//        }
+//
+//        // ffn rmsnorm
+//        rmsnorm(
+//            o: &s.xb, x: x, weight: Array(w.rms_ffn_weight[(l * dim)..<(l * dim + dim)]), size: dim)
+//
+//        // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
+//        // first calculate self.w1(x) and self.w3(x)
+//        matmul(
+//            &s.hb, s.xb,
+//            Array(w.w1[(l * dim * hidden_dim)..<(l * dim * hidden_dim + dim * hidden_dim)]), dim,
+//            hidden_dim)
+//        matmul(
+//            &s.hb2, s.xb,
+//            Array(w.w3[(l * dim * hidden_dim)..<(l * dim * hidden_dim + dim * hidden_dim)]), dim,
+//            hidden_dim)
+//
+//        // SwiGLU non-linearity
+//        for i in 0..<hidden_dim {
+//            var val = s.hb[i]
+//            // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
+//            val *= (1.0 / (1.0 + exp(-val)))
+//            // elementwise multiply with w3(x)
+//            val *= s.hb2[i]
+//            s.hb[i] = val
+//        }
+//
+//        // final matmul to get the output of the ffn
+//        matmul(
+//            &s.xb, s.hb,
+//            Array(w.w2[(l * dim * hidden_dim)..<(l * dim * hidden_dim + hidden_dim * dim)]),
+//            hidden_dim, dim)
+//
+//        // residual connection
+//        for i in 0..<dim {
+//            x[i] += s.xb[i]
+//        }
+//    }
+//
+//    // final rmsnorm
+//    rmsnorm(o: &x, x: x, weight: w.rms_final_weight, size: dim)
+//
+//    // classifier into logits  //TODO:待确认
+//    matmul(&s.logits, x, w.wcls ?? [], Int(p.dim), Int(p.vocab_size))
+//    return s.logits
+//}
 
 // ----------------------------------------------------------------------------
 // The Byte Pair Encoding (BPE) Tokenizer that translates strings <-> tokens
@@ -868,7 +868,14 @@ func generate(
     while pos < steps {
 
         // forward the transformer to get logits for the next token
-        var logits = forward(transformer: &transformer, token: token, pos: pos)
+//        var logits = forward(transformer: &transformer, token: token, pos: pos)
+        
+        var logits: [Float] = []
+        var ptr = forward(&transformer, Int32(token), Int32(pos))
+        // ptr 是float*指针，是一个地址，需要转换为数组
+        for i in 0..<Int(transformer.config.vocab_size) {
+            logits.append(ptr![i])
+        }
 
         // advance the state machine
         if pos < numPromptTokens - 1 {
@@ -892,7 +899,7 @@ func generate(
         // init the timer here because the first iteration can be slower
         if start == 0 { start = timeInMs() }
     }
-    print("\n")
+//    print("\n")
 
     // report achieved tok/s (pos-1 because the timer starts after first iteration)
     if pos > 1 {
@@ -915,76 +922,76 @@ func readStdin(guide: String) -> String? {
 // python reference and that seemed ok, but this was not thoroughly tested and
 // is not safely implemented, it's more a proof of concept atm.
 
-func chat(
-    transformer: Transformer, tokenizer: Tokenizer, sampler: inout Sampler, cliUserPrompt: String?,
-    cliSystemPrompt: String?, steps: Int
-) {
-    var systemPrompt = ""
-    var userPrompt = ""
-    var renderedPrompt = ""
-    var numPromptTokens = 0
-    var promptTokens = [Int](repeating: 0, count: 1152)
-    var userIdx: Int = 0
-
-    var userTurn: Bool = true
-    var next: Int = 0
-    var token: Int = 0
-    var pos = 0
-
-    var tokenizer = tokenizer  // Make the 'tokenizer' parameter mutable
-    var transformer = transformer  // Make the 'transformer' parameter mutable
-
-    while pos < steps {
-        if userTurn {
-            if pos == 0 {
-                if let cliSystemPrompt = cliSystemPrompt {
-                    systemPrompt = cliSystemPrompt
-                } else {
-                    systemPrompt = readStdin(guide: "Enter system prompt (optional): ") ?? ""
-                }
-            }
-            if pos == 0 && cliUserPrompt != nil {
-                userPrompt = cliUserPrompt!
-            } else {
-                userPrompt = readStdin(guide: "User: ") ?? ""
-            }
-            if pos == 0 && !systemPrompt.isEmpty {
-                let systemTemplate = "[INST] <<SYS>>\n%@\n<</SYS>>\n\n%@ [/INST]"
-                renderedPrompt = String(format: systemTemplate, systemPrompt, userPrompt)
-            } else {
-                let userTemplate = "[INST] %@ [/INST]"
-                renderedPrompt = String(format: userTemplate, userPrompt)
-            }
-            encode(
-                t: &tokenizer, text: renderedPrompt, bos: 1, eos: 0, tokens: &promptTokens,
-                n_tokens: &numPromptTokens)
-            userIdx = 0
-            userTurn = false
-            print("Assistant: ", terminator: "")
-        }
-
-        if userIdx < numPromptTokens {
-            token = promptTokens[userIdx]
-            userIdx += 1
-        } else {
-            token = next
-        }
-        if token == 2 { userTurn = true }
-
-        var logits = forward(transformer: &transformer, token: token, pos: pos)
-        next = sample(sampler: &sampler, logits: &logits)
-        pos += 1
-
-        if userIdx >= numPromptTokens && next != 2 {
-            let piece = decode(t: &tokenizer, prevToken: token, token: next)
-            print(piece, terminator: "")
-            fflush(stdout)
-        }
-        if next == 2 { print("\n") }
-    }
-    print("\n")
-    promptTokens = []
-}
+//func chat(
+//    transformer: Transformer, tokenizer: Tokenizer, sampler: inout Sampler, cliUserPrompt: String?,
+//    cliSystemPrompt: String?, steps: Int
+//) {
+//    var systemPrompt = ""
+//    var userPrompt = ""
+//    var renderedPrompt = ""
+//    var numPromptTokens = 0
+//    var promptTokens = [Int](repeating: 0, count: 1152)
+//    var userIdx: Int = 0
+//
+//    var userTurn: Bool = true
+//    var next: Int = 0
+//    var token: Int = 0
+//    var pos = 0
+//
+//    var tokenizer = tokenizer  // Make the 'tokenizer' parameter mutable
+//    var transformer = transformer  // Make the 'transformer' parameter mutable
+//
+//    while pos < steps {
+//        if userTurn {
+//            if pos == 0 {
+//                if let cliSystemPrompt = cliSystemPrompt {
+//                    systemPrompt = cliSystemPrompt
+//                } else {
+//                    systemPrompt = readStdin(guide: "Enter system prompt (optional): ") ?? ""
+//                }
+//            }
+//            if pos == 0 && cliUserPrompt != nil {
+//                userPrompt = cliUserPrompt!
+//            } else {
+//                userPrompt = readStdin(guide: "User: ") ?? ""
+//            }
+//            if pos == 0 && !systemPrompt.isEmpty {
+//                let systemTemplate = "[INST] <<SYS>>\n%@\n<</SYS>>\n\n%@ [/INST]"
+//                renderedPrompt = String(format: systemTemplate, systemPrompt, userPrompt)
+//            } else {
+//                let userTemplate = "[INST] %@ [/INST]"
+//                renderedPrompt = String(format: userTemplate, userPrompt)
+//            }
+//            encode(
+//                t: &tokenizer, text: renderedPrompt, bos: 1, eos: 0, tokens: &promptTokens,
+//                n_tokens: &numPromptTokens)
+//            userIdx = 0
+//            userTurn = false
+//            print("Assistant: ", terminator: "")
+//        }
+//
+//        if userIdx < numPromptTokens {
+//            token = promptTokens[userIdx]
+//            userIdx += 1
+//        } else {
+//            token = next
+//        }
+//        if token == 2 { userTurn = true }
+//
+//        var logits = forward(transformer: &transformer, token: token, pos: pos)
+//        next = sample(sampler: &sampler, logits: &logits)
+//        pos += 1
+//
+//        if userIdx >= numPromptTokens && next != 2 {
+//            let piece = decode(t: &tokenizer, prevToken: token, token: next)
+//            print(piece, terminator: "")
+//            fflush(stdout)
+//        }
+//        if next == 2 { print("\n") }
+//    }
+//    print("\n")
+//    promptTokens = []
+//}
 
 func errorUsage() {
     print("Usage:   run <checkpoint> [options]")
@@ -1039,7 +1046,14 @@ if temperature < 0.0 { temperature = 0.0 }
 if topp < 0.0 || topp > 1.0 { topp = 0.9 }
 if steps < 0 { steps = 0 }
 
-var transformer = buildTransformer(checkpointPath)
+//var transformer = buildTransformer(checkpointPath)
+var transformer = Transformer()
+if var cString = checkpointPath.cString(using: .utf8) {
+    cString.withUnsafeMutableBufferPointer { buffer in
+        build_transformer(&transformer, buffer.baseAddress)
+    }
+}
+
 if steps == 0 || steps > transformer.config.seq_len { steps = Int(transformer.config.seq_len) }
 
 var tokenizer = buildTokenizer(
@@ -1054,9 +1068,9 @@ if mode == "generate" {
         transformer: transformer, tokenizer: tokenizer, sampler: &sampler, prompt: prompt,
         steps: steps)
 } else if mode == "chat" {
-    chat(
-        transformer: transformer, tokenizer: tokenizer, sampler: &sampler, cliUserPrompt: prompt,
-        cliSystemPrompt: systemPrompt, steps: steps)
+//    chat(
+//        transformer: transformer, tokenizer: tokenizer, sampler: &sampler, cliUserPrompt: prompt,
+//        cliSystemPrompt: systemPrompt, steps: steps)
 } else {
     print("unknown mode: \(mode)")
     errorUsage()
@@ -1064,5 +1078,5 @@ if mode == "generate" {
 
 freeSampler(sampler: &sampler)
 freeTokenizer(t: &tokenizer)
-freeTransformer(t: &transformer)
+//freeTransformer(t: &transformer)
 
