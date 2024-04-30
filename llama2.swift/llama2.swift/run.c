@@ -20,7 +20,14 @@
     #include <sys/mman.h>
 #endif
 
+float * temp_x = NULL;
+int dim_sizeof_x = 0;
 
+
+float** tmp_xb;
+float** tmp_q;
+float** tmp_k;
+float** tmp_v;
 
 void malloc_run_state(RunState* s, Config* p) {
     // we calloc instead of malloc to keep valgrind happy
@@ -185,6 +192,15 @@ float* forward(Transformer* transformer, int token, int pos) {
     int hidden_dim =  p->hidden_dim;
     int head_size = dim / p->n_heads;
 
+    //打印
+    printf("c[xiaoxiao]dim:%d\n",dim);
+    printf("c[xiaoxiao]kv_dim:%d\n",kv_dim);
+    printf("c[xiaoxiao]kv_mul:%d\n",kv_mul);
+    printf("c[xiaoxiao]hidden_dim:%d\n",hidden_dim);
+    printf("c[xiaoxiao]head_size:%d\n",head_size);
+
+
+
     // copy the token embedding into x
     float* content_row = w->token_embedding_table + token * dim;
     
@@ -194,11 +210,22 @@ float* forward(Transformer* transformer, int token, int pos) {
     
     memcpy(x, content_row, dim*sizeof(*x));
 
+    temp_x = x;
+    dim_sizeof_x = dim*sizeof(*x);
+
+
+    tmp_q = malloc(p->n_layers * sizeof(float*));
+    tmp_k = malloc(p->n_layers * sizeof(float*));
+    tmp_v = malloc(p->n_layers * sizeof(float*));
+    tmp_xb = malloc(p->n_layers * sizeof(float*));
+
     // forward all the layers
     for(unsigned long long l = 0; l < p->n_layers; l++) {
 
         // attention rmsnorm
         rmsnorm(s->xb, x, w->rms_att_weight + l*dim, dim);
+        tmp_xb[l] = malloc(dim*sizeof(float));
+        memcpy(tmp_xb[l], s->xb, dim*sizeof(float));
 
         // key and value point to the kv cache
         int loff = l * p->seq_len * kv_dim; // kv cache layer offset for convenience
@@ -209,6 +236,14 @@ float* forward(Transformer* transformer, int token, int pos) {
         matmul(s->q, s->xb, w->wq + l*dim*dim, dim, dim);
         matmul(s->k, s->xb, w->wk + l*dim*kv_dim, dim, kv_dim);
         matmul(s->v, s->xb, w->wv + l*dim*kv_dim, dim, kv_dim);
+
+        tmp_q[l] = malloc(dim*sizeof(float));
+        tmp_k[l] = malloc(kv_dim*sizeof(float));
+        tmp_v[l] = malloc(kv_dim*sizeof(float));
+        memcpy(tmp_q[l], s->q, dim*sizeof(float));
+        memcpy(tmp_k[l], s->k, kv_dim*sizeof(float));
+        memcpy(tmp_v[l], s->v, kv_dim*sizeof(float));
+
 
         // RoPE relative positional encoding: complex-valued rotate q and k in each head
         for (int i = 0; i < dim; i+=2) {

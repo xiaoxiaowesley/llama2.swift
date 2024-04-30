@@ -839,12 +839,18 @@ func timeInMs() -> Int64 {
 }
 
 // transform 前向传播
-func myForward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
-    
+func myForward(transformer: inout Transformer,transformer2: inout Transformer,token:Int,pos:Int)->[Float]{
+    // ptr 是float*指针，是一个地址，需要转换为数组
+    var logits: [Float] = []
+    let ptr = forward(&transformer2, Int32(token), Int32(pos))
+    for i in 0..<Int(transformer2.config.vocab_size) {
+        logits.append(ptr![i])
+    }
+
     /// 开始
-    var p: Config = transformer.config
+    let p: Config = transformer.config
     // 存储一个Transformer模型中所有权重参数
-    var w: TransformerWeights = transformer.weights
+    let w: TransformerWeights = transformer.weights
     // 存储一个Transformer模型中所有状态参数。
     var s: RunState = transformer.state
     // 这是一个Transformer模型的输入，是一个长度为dim的向量
@@ -855,15 +861,60 @@ func myForward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
     let kv_mul = p.n_heads / p.n_kv_heads
     let hidden_dim = p.hidden_dim
     let head_size = dim / p.n_heads
+    //打印
+//    print("swift[xiaoxiao]dim:\(dim)")
+//    print("swift[xiaoxiao]kv_dim:\(kv_dim)")
+//    print("swift[xiaoxiao]kv_mul:\(kv_mul)")
+//    print("swift[xiaoxiao]hidden_dim:\(hidden_dim)")
+//    print("swift[xiaoxiao]head_size:\(head_size)")
+
     
     // copy the token embedding into x
     
     let content_row = w.token_embedding_table + token * Int(dim)
     memcpy(x,content_row,Int(dim) * MemoryLayout<Float>.size)
     
+    let swift_dim_sizeof_x = MemoryLayout<Float>.size * Int(dim)
+    if swift_dim_sizeof_x == dim_sizeof_x {
+        print ("swift[xiaoxiao]dim_sizeof_x:\(swift_dim_sizeof_x),dim_sizeof_x:\(dim_sizeof_x)")
+
+        for d in 0..<Int(dim){
+            if let temp_x = temp_x ,
+                let x = x {
+                let c_x = temp_x + d
+                let s_x = x + d
+                // c_x和s_x都是浮点数，对比两个浮点数是否相等
+                if c_x.pointee != s_x.pointee {
+//                    print("swift[xiaoxiao]c_x:\(c_x.pointee),s_x:\(s_x.pointee)")
+                }else {
+//                    print("swift[xiaoxiao]c_x:\(c_x.pointee) == s_x:\(s_x.pointee)")
+                }
+            }
+        }
+
+    }else{
+        print ("swift[xiaoxiao]dim_sizeof_x:\(swift_dim_sizeof_x),dim_sizeof_x:\(dim_sizeof_x)")
+    }
+
     for l in 0..<Int(p.n_layers) {
         // attention rmsnorm
         rmsnorm( s.xb,  x, w.rms_att_weight + l * Int(dim), Int32(Int(dim)))
+        
+        // 对比把s.xb 和tmp_xb[l]的每一个元素进行对比
+        for xb_idx in 0..<Int(dim) {
+            if let xb = s.xb, let tmp_xb_array = tmp_xb[l]  {
+                let xb_element = xb + xb_idx
+                let tmp_xb_element = tmp_xb_array + xb_idx
+                if tmp_xb_element.pointee == xb_element.pointee {
+//                    print("swift[xiaoxiao]xb_element:\(xb_element.pointee) == tmp_xb_element:\(tmp_xb_element.pointee)")
+                } else {
+//                    print("swift[xiaoxiao]xb_element:\(xb_element.pointee),tmp_xb_element:\(tmp_xb_element.pointee)")
+                }
+            }else{
+//                print("swift[xiaoxiao]xb:\(s.xb),tmp_xb[l]:\(tmp_xb[l])")
+            }
+        }
+
 
         // key and value point to the kv cache
         let loff = Int(l) * Int(p.seq_len) * Int(kv_dim)
@@ -874,6 +925,52 @@ func myForward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
         matmul(s.q, x, w.wq + l * Int(dim) * Int(dim), Int32(dim), Int32(dim))
         matmul(s.k, x, w.wk + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
         matmul(s.v, x, w.wv + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
+        
+        // 对比把s.q 和tmp_q[l]的每一个元素进行对比
+
+        for q_idx in 0..<Int(dim) {
+            if let q = s.q, let tmp_q_array = tmp_q[l]  {
+                let q_element = q + q_idx
+                let tmp_q_element = tmp_q_array + q_idx
+                if tmp_q_element.pointee == q_element.pointee {
+//                    print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
+                } else {
+//                    print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
+                }
+            }else{
+//                print("swift[xiaoxiao]q:\(s.q),tmp_q[l]:\(tmp_q[l])")
+            }
+        }
+        // 对比把s.k 和tmp_k[l]的每一个元素进行对比
+        for k_idx in 0..<Int(kv_dim) {
+            if let k = s.k, let tmp_k_array = tmp_k[l]  {
+                let k_element = k + k_idx
+                let tmp_k_element = tmp_k_array + k_idx
+                if tmp_k_element.pointee == k_element.pointee {
+//                    print("swift[xiaoxiao]k_element:\(k_element.pointee),tmp_k_element:\(tmp_k_element.pointee)")
+                } else {
+//                    print("swift[xiaoxiao]k_element:\(k_element.pointee),tmp_k_element:\(tmp_k_element.pointee)")
+                }
+            }else{
+//                print("swift[xiaoxiao]k:\(s.k),tmp_k[l]:\(String(describing: tmp_k[l]))")
+            }
+        }
+      
+        // 对比把s.v 和tmp_v[l]的每一个元素进行对比
+        for v_idx in 0..<Int(kv_dim) {
+            if let v = s.v, let tmp_v_array = tmp_v[l]  {
+                let v_element = v + v_idx
+                let tmp_v_element = tmp_v_array + v_idx
+                if tmp_v_element.pointee == v_element.pointee {
+//                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
+                } else {
+//                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
+                }
+            }else{
+//                print("swift[xiaoxiao]v:\(s.v),tmp_v[l]:\(tmp_v[l])")
+            }
+        }
+
 
         // RoPE relative positional encoding: complex-valued rotate q and k in each head
         for i in stride(from: 0, to: Int(dim), by: 2) {
@@ -982,21 +1079,15 @@ func myForward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
     
     /// 结束
     
-    // ptr 是float*指针，是一个地址，需要转换为数组
-    var logits: [Float] = []
-//    var ptr = s.logits
-    var ptr = forward(&transformer, Int32(token), Int32(pos))
- 
-    for i in 0..<Int(transformer.config.vocab_size) {
-        logits.append(ptr![i])
-    }
+
     return logits
 }
 
 // ----------------------------------------------------------------------------
 // generation loop
 func generate(
-    transformer: Transformer, tokenizer: Tokenizer, sampler: inout Sampler, prompt: String?,
+    transformer: Transformer,
+    transformer2: Transformer, tokenizer: Tokenizer, sampler: inout Sampler, prompt: String?,
     steps: Int
 ) {
     let prompt = prompt ?? ""
@@ -1007,6 +1098,7 @@ func generate(
 
     var tokenizer = tokenizer  // Make the 'tokenizer' parameter mutable
     var transformer = transformer  // Make the 'transformer' parameter mutable
+    var transformer2 = transformer2  // Make the 'transformer' parameter mutable
     encode(
         t: &tokenizer, text: prompt, bos: 1, eos: 0, tokens: &promptTokens,
         n_tokens: &numPromptTokens)
@@ -1025,7 +1117,7 @@ func generate(
         // forward the transformer to get logits for the next token
 //        var logits = forward(transformer: &transformer, token: token, pos: pos)
 
-        var logits = myForward(transformer: &transformer, token: token, pos: pos)
+        var logits = myForward(transformer: &transformer, transformer2: &transformer2, token: token, pos: pos)
 
         // advance the state machine
         if pos < numPromptTokens - 1 {
@@ -1204,6 +1296,13 @@ if var cString = checkpointPath.cString(using: .utf8) {
     }
 }
 
+var transformer2 = Transformer()
+if var cString = checkpointPath.cString(using: .utf8) {
+    cString.withUnsafeMutableBufferPointer { buffer in
+        build_transformer(&transformer2, buffer.baseAddress)
+    }
+}
+
 if steps == 0 || steps > transformer.config.seq_len { steps = Int(transformer.config.seq_len) }
 
 var tokenizer = buildTokenizer(
@@ -1215,7 +1314,7 @@ var sampler = buildSampler(
 
 if mode == "generate" {
     generate(
-        transformer: transformer, tokenizer: tokenizer, sampler: &sampler, prompt: prompt,
+        transformer: transformer,transformer2: transformer2, tokenizer: tokenizer, sampler: &sampler, prompt: prompt,
         steps: steps)
 } else if mode == "chat" {
 //    chat(
