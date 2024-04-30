@@ -848,17 +848,17 @@ func myForward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
     // 存储一个Transformer模型中所有状态参数。
     var s: RunState = transformer.state
     // 这是一个Transformer模型的输入，是一个长度为dim的向量
-    var x = s.x
-    var dim = p.dim
+    let x = s.x
+    let dim = p.dim
     // 这是多头注意力机制的维度
-    var kv_dim = (p.dim * p.n_kv_heads) / p.n_heads
-    var kv_mul = p.n_heads / p.n_kv_heads
-    var hidden_dim = p.hidden_dim
-    var head_size = dim / p.n_heads
+    let kv_dim = (p.dim * p.n_kv_heads) / p.n_heads
+    let kv_mul = p.n_heads / p.n_kv_heads
+    let hidden_dim = p.hidden_dim
+    let head_size = dim / p.n_heads
     
     // copy the token embedding into x
     
-    var content_row = w.token_embedding_table + token * Int(dim)
+    let content_row = w.token_embedding_table + token * Int(dim)
     memcpy(x,content_row,Int(dim) * MemoryLayout<Float>.size)
     
     for l in 0..<Int(p.n_layers) {
@@ -866,7 +866,7 @@ func myForward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
         rmsnorm( s.xb,  x, w.rms_att_weight + l * Int(dim), Int32(Int(dim)))
 
         // key and value point to the kv cache
-        var loff = Int(l) * Int(p.seq_len) * Int(kv_dim)
+        let loff = Int(l) * Int(p.seq_len) * Int(kv_dim)
         s.k = s.key_cache + loff + pos * Int(kv_dim)
         s.v = s.value_cache + loff + pos * Int(kv_dim) 
 
@@ -884,8 +884,8 @@ func myForward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
             let fci = sin(val)
             let rotn = i < Int(kv_dim) ? 2 : 1  // how many vectors? 2 = q & k, 1 = q only
             for v in 0..<rotn {
-                var vec = v == 0 ? s.q : s.k  // the vector to rotate (query or key)
-                if var vec = vec {
+                let vec = v == 0 ? s.q : s.k  // the vector to rotate (query or key)
+                if let vec = vec {
                     let v0 = vec[i]
                     let v1 = vec[i + 1]
                     vec[i] = v0 * fcr - v1 * fci
@@ -895,22 +895,18 @@ func myForward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
         }
 
         // multihead attention. iterate over all heads
-        var h = 0
         // 遍历所有的头
         for h in 0..<Int(p.n_heads) {
             // get the query vector for this head
             let q = s.q + h * Int(head_size)
             // attention scores for this head
-            var att = s.att + h * Int(p.seq_len)
+            let att = s.att + h * Int(p.seq_len)
             // iterate over all timesteps, including the current one
-            var t = 0
             for t in 0...pos {
                 // get the key vector for this head and at this timestep
-                let h_devide_km_mul : Int = h/Int(kv_mul)
                 let k = s.key_cache + loff + Int(t * Int(kv_dim)) + h/Int(kv_mul) * Int(head_size)
                 // calculate the attention score as the dot product of q and k
                 var score: Float = 0.0
-                var i = 0
                 for i in 0..<Int(head_size) {
                     score += q[i] * k[i]
                 }
@@ -923,14 +919,13 @@ func myForward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
             softmax(att,Int32(pos + 1))
 
             // weighted sum of the values, store back into xb
-            var xb = s.xb + h * Int(head_size)
+            let xb = s.xb + h * Int(head_size)
             for t in 0...pos {
                 // get the value vector for this head and at this timestep
                 let v = s.value_cache + loff + t * Int(kv_dim) + h / Int(kv_mul) * Int(head_size)
                 // get the attention weight for this timestep
                 let a = att[t]
                 // accumulate the weighted value into xb
-                var i = 0
                 for i in 0..<Int(head_size) {
                     xb[i] += a * v[i]
                 }
@@ -940,7 +935,6 @@ func myForward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
         // final matmul to get the output of the attention
         matmul(s.xb2, s.xb, w.wo + l * Int(dim) * Int(dim), Int32(dim), Int32(dim))
         // residual connection back into x
-        var i = 0
         for i in 0..<Int(dim) {
             if let x = x {
                 x[i] += s.xb2[i]
