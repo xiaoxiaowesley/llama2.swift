@@ -100,12 +100,6 @@ extern float * temp_x;
 extern int dim_sizeof_x;
 // ✅
 extern float** tmp_xb;
-//
-extern float** tmp_wq; // (layer, dim, n_heads * head_size)
-extern float** tmp_wk; // (layer, dim, n_kv_heads * head_size)
-extern float** tmp_wv; // (layer, dim, n_kv_heads * head_size)
-extern float** tmp_wo; // (layer, n_heads * head_size, dim)
-
 
 extern int* tmp_loff;
 extern float** tmp_q;

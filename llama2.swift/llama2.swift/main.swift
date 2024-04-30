@@ -1027,58 +1027,13 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
         s.v = s.value_cache + loff + pos * Int(kv_dim)
 
         // qkv matmuls for this position
-        /// [3]🟡
-        print("w.wq[24575]:\(w.wq[24575])")
-        print("tmp_wq[24575]:\(tmp_wq[l]![24575])")
-        
-        print("w.wq[24576]:\(w.wq[24576])")
-        print("tmp_wq[24576]:\(tmp_wq[l]![24576])")
-        
-
-        print("继续对比")
-        print("w.wq[24576]:\(w.wq[24576])")        
-        print("w2.wq[24576]:\(w2.wq[24576])")
-
-        for i in 0..<Int(dim) {
-            for j in 0..<Int(dim) {
-                var idx = i * j
-                let wq_ptr = w.wq + l * Int(dim) * Int(dim)
-                let tmp_ptr = tmp_wq[l]
-                
-                if let tmp_ptr = tmp_ptr {
-                    let wq_elem = wq_ptr[idx]
-                    let tmp_wq_elem = tmp_ptr[idx]
-                    
-                    if wq_elem != tmp_wq_elem {
-                        print("wq_elem[\(idx)]:\(wq_ptr[idx]) != tmp_wq_elem[\(idx)]:\(tmp_ptr[idx])")
-                        
-                        idx = idx - 1
-                        print("wq_elem[\(idx)]:\(wq_ptr[idx]),tmp_wq_elem[\(idx)]:\(tmp_ptr[idx])")
-
-                        idx = idx - 1
-                        print("wq_elem[\(idx)]:\(wq_ptr[idx]),tmp_wq_elem[\(idx)]:\(tmp_ptr[idx])")
-                    }else{
-//                        print("wq_elem[\(idx)]:\(wq_elem) == tmp_wq_elem[\(idx)]:\(tmp_wq_elem)")
-                    }
-                }
-            }        
-        }
-//        for (i = 0; i < d; i++) {
-//            float val = 0.0f;
-//            for (int j = 0; j < n; j++) {
-//                val += w[i * n + j] * x[j];
-//            }
-//            xout[i] = val;
-//        }
-        /// 👈
         
         matmul(s.q, x, w.wq + l * Int(dim) * Int(dim), Int32(dim), Int32(dim))
         matmul(s.k, x, w.wk + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
         matmul(s.v, x, w.wv + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
         
         // 对比把s.q 和tmp_q[l]的每一个元素进行对比
-        /// [4]🟡
-
+        /// [3]🟡
         for q_idx in 0..<Int(dim) {
             if let q = s.q, let tmp_q_array = tmp_q[l]  {
                 let q_element = q + q_idx

@@ -28,13 +28,6 @@ int* tmp_loff;
 
 float** tmp_xb;
 
-//
-float** tmp_wq; // (layer, dim, n_heads * head_size)
-float** tmp_wk; // (layer, dim, n_kv_heads * head_size)
-float** tmp_wv; // (layer, dim, n_kv_heads * head_size)
-float** tmp_wo; // (layer, n_heads * head_size, dim)
-
-
 float** tmp_q;
 float** tmp_k;
 float** tmp_v;
@@ -233,12 +226,6 @@ float* forward(Transformer* transformer, int token, int pos) {
     tmp_k = malloc(p->n_layers * sizeof(float*));
     tmp_v = malloc(p->n_layers * sizeof(float*));
     tmp_xb = malloc(p->n_layers * sizeof(float*));
-
-    tmp_wq = malloc(p->n_layers * p->dim * (p->n_heads * head_size)); // (layer, dim, n_heads * head_size)
-    tmp_wk = malloc(p->n_layers * p->dim * (p->n_kv_heads * head_size)); // (layer, dim, n_kv_heads * head_size)
-    tmp_wv = malloc(p->n_layers * p->dim * (p->n_kv_heads * head_size)); // (layer, dim, n_kv_heads * head_size)
-    tmp_wo = malloc(p->n_layers * (p->n_heads * head_size) * p->dim); // (layer, n_heads * head_size, dim)
-
     
     tmp_loff = malloc(p->n_layers * sizeof(int));    
 
@@ -261,30 +248,15 @@ float* forward(Transformer* transformer, int token, int pos) {
         /// [2]🟡 ✅
         tmp_loff[l] = loff;
         /// 👈
-        
-        /// [3]🟡
-        tmp_wq[l] = malloc(p->dim * (p->n_heads * head_size)); // (layer, dim, n_heads * head_size)
-        tmp_wk[l] = malloc(p->dim * (p->n_kv_heads * head_size)); // (layer, dim, n_kv_heads * head_size)
-        tmp_wv[l] = malloc(p->dim * (p->n_kv_heads * head_size)); // (layer, dim, n_kv_heads * head_size)
-
-        memcpy(tmp_wq[l], w->wq + l*dim*dim, dim*dim*sizeof(float));
-        memcpy(tmp_wk[l], w->wk + l*dim*kv_dim, dim*kv_dim*sizeof(float));
-        memcpy(tmp_wv[l], w->wv + l*dim*kv_dim, dim*kv_dim*sizeof(float));
-        /// 👈
-        
-
+           
         // qkv matmuls for this position
         matmul(s->q, s->xb, w->wq + l*dim*dim, dim, dim);
-        //打印 w->wq[24576]
-        printf("c[xiaoxiao]w->wq[24575]:%f\n",w->wq[24575]);
-        printf("c[xiaoxiao]w->wq[24576]:%f\n",w->wq[24576]);
-        printf("c[xiaoxiao]w->wq[24577]:%f\n",w->wq[24577]);
         
         matmul(s->k, s->xb, w->wk + l*dim*kv_dim, dim, kv_dim);
         matmul(s->v, s->xb, w->wv + l*dim*kv_dim, dim, kv_dim);
         
        
-        /// [4]🟡
+        /// [3]🟡
         tmp_q[l] = malloc(dim*sizeof(float));
         tmp_k[l] = malloc(kv_dim*sizeof(float));
         tmp_v[l] = malloc(kv_dim*sizeof(float));
