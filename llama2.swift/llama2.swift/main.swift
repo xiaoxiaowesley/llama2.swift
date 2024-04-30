@@ -868,16 +868,111 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
 //    print("swift[xiaoxiao]hidden_dim:\(hidden_dim)")
 //    print("swift[xiaoxiao]head_size:\(head_size)")
 
+    let w2: TransformerWeights = transformer2.weights
+    
+    //✅  对比w2和w的token_embedding_table的每个值
+    for i in 0..<Int(p.vocab_size * dim) {
+        let t1 = w.token_embedding_table[i]
+        let t2 = w2.token_embedding_table[i]
+
+        //t1,t2是浮点数，对比两个浮点数是否相等
+        if t1 != t2 {
+            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
+        }
+    }
+    //对比w2和w的rms_att_weight每个值
+    for i in 0..<Int(p.n_layers * dim) {
+        let t1 = w.rms_att_weight[i]
+        let t2 = w2.rms_att_weight[i]
+        if t1 != t2 {
+            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
+        }
+    }
+    
+    // 对比w2和w的wq每个值
+    for i in 0..<Int( p.n_layers * p.dim * (p.n_heads * head_size)) {
+        let t1 = w.wq[i]
+        let t2 = w2.wq[i]
+        if t1 != t2 {
+            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
+        }
+    }
+    
+    
+    
+    // 对比w2和w的wk每个值
+    for i in 0..<Int(p.n_layers *  p.dim * (p.n_kv_heads * head_size)) {
+        let t1 = w.wk[i]
+        let t2 = w2.wk[i]
+        if t1 != t2 {
+            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
+        }
+    }
+    // 对比w2和w的wv每个值
+    for i in 0..<Int(p.n_layers *  p.dim * (p.n_kv_heads * head_size)) {
+        let t1 = w.wv[i]
+        let t2 = w2.wv[i]
+        if t1 != t2 {
+            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
+        }
+    }
+    // 对比w2和w的wo每个值
+    for i in 0..<Int(p.n_layers * (p.n_heads * head_size) * p.dim) {
+        let t1 = w.wo[i]
+        let t2 = w2.wo[i]
+        if t1 != t2 {
+            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
+        }
+    }
+
+    // 对比w2和w的rms_ffn_weight每个值
+    for i in 0..<Int(p.n_layers * dim) {
+        let t1 = w.rms_ffn_weight[i]
+        let t2 = w2.rms_ffn_weight[i]
+        if t1 != t2 {
+            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
+        }
+    }
+
+    // 对比w2和w的w1每个值
+    for i in 0..<Int(p.n_layers * hidden_dim * dim) {
+        let t1 = w.w1[i]
+        let t2 = w2.w1[i]
+        if t1 != t2 {
+            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
+        }
+    }
+    // 对比w2和w的w2每个值
+    for i in 0..<Int(p.n_layers * dim * hidden_dim) {
+        let t1 = w.w2[i]
+        let t2 = w2.w2[i]
+        if t1 != t2 {
+            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
+        }
+    }
+    // 对比w2和w的w3每个值
+    for i in 0..<Int(p.n_layers * hidden_dim * dim) {
+        let t1 = w.w3[i]
+        let t2 = w2.w3[i]
+        if t1 != t2 {
+            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
+        }
+    }
+    
+    print("最开始的时候!!对比两个transform的weight")
+    print("w.wq[24575]:\(w.wq[24575])")
+    print("w2.wq[24575]:\(w2.wq[24575])")
+    print("w.wq[24576]:\(w.wq[24576])")
+    print("w2.wq[24576]:\(w2.wq[24576])")
+
     
     // copy the token embedding into x
     
     let content_row = w.token_embedding_table + token * Int(dim)
     memcpy(x,content_row,Int(dim) * MemoryLayout<Float>.size)
-    
+    // ✅
     let swift_dim_sizeof_x = MemoryLayout<Float>.size * Int(dim)
     if swift_dim_sizeof_x == dim_sizeof_x {
-        print ("swift[xiaoxiao]dim_sizeof_x:\(swift_dim_sizeof_x),dim_sizeof_x:\(dim_sizeof_x)")
-
         for d in 0..<Int(dim){
             if let temp_x = temp_x ,
                 let x = x {
@@ -885,7 +980,7 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
                 let s_x = x + d
                 // c_x和s_x都是浮点数，对比两个浮点数是否相等
                 if c_x.pointee != s_x.pointee {
-//                    print("swift[xiaoxiao]c_x:\(c_x.pointee),s_x:\(s_x.pointee)")
+                    print("swift[xiaoxiao]c_x:\(c_x.pointee),s_x:\(s_x.pointee)")
                 }else {
 //                    print("swift[xiaoxiao]c_x:\(c_x.pointee) == s_x:\(s_x.pointee)")
                 }
@@ -900,6 +995,7 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
         // attention rmsnorm
         rmsnorm( s.xb,  x, w.rms_att_weight + l * Int(dim), Int32(Int(dim)))
         
+        // ✅ [1] tmp_xb
         // 对比把s.xb 和tmp_xb[l]的每一个元素进行对比
         for xb_idx in 0..<Int(dim) {
             if let xb = s.xb, let tmp_xb_array = tmp_xb[l]  {
@@ -908,37 +1004,92 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
                 if tmp_xb_element.pointee == xb_element.pointee {
 //                    print("swift[xiaoxiao]xb_element:\(xb_element.pointee) == tmp_xb_element:\(tmp_xb_element.pointee)")
                 } else {
-//                    print("swift[xiaoxiao]xb_element:\(xb_element.pointee),tmp_xb_element:\(tmp_xb_element.pointee)")
+                    print("swift[xiaoxiao]xb_element:\(xb_element.pointee),tmp_xb_element:\(tmp_xb_element.pointee)")
                 }
             }else{
-//                print("swift[xiaoxiao]xb:\(s.xb),tmp_xb[l]:\(tmp_xb[l])")
+                print("swift[xiaoxiao]xb:\(s.xb),tmp_xb[l]:\(tmp_xb[l])")
             }
         }
 
-
-        // key and value point to the kv cache
+        // ✅
+        //key and value point to the kv cache
         let loff = Int(l) * Int(p.seq_len) * Int(kv_dim)
+        // 
+        if tmp_loff[l] != loff {
+            print("swift[xiaoxiao]tmp_loff[l]:\(tmp_loff[l]),loff:\(loff)")
+        }else{
+            print("swift[xiaoxiao]tmp_loff[l]:\(tmp_loff[l]) == loff:\(loff)")
+        }
+        
+        // k的长度是 p->n_layers * p->seq_len * kv_dim 比如l=0,就是 0~n_layers*seq_len*kv_dim
         s.k = s.key_cache + loff + pos * Int(kv_dim)
-        s.v = s.value_cache + loff + pos * Int(kv_dim) 
+        // v的长度是 p->n_layers * p->seq_len * kv_dim
+        s.v = s.value_cache + loff + pos * Int(kv_dim)
 
         // qkv matmuls for this position
+        /// [3]🟡
+        print("w.wq[24575]:\(w.wq[24575])")
+        print("tmp_wq[24575]:\(tmp_wq[l]![24575])")
+        
+        print("w.wq[24576]:\(w.wq[24576])")
+        print("tmp_wq[24576]:\(tmp_wq[l]![24576])")
+        
+
+        print("继续对比")
+        print("w.wq[24576]:\(w.wq[24576])")        
+        print("w2.wq[24576]:\(w2.wq[24576])")
+
+        for i in 0..<Int(dim) {
+            for j in 0..<Int(dim) {
+                var idx = i * j
+                let wq_ptr = w.wq + l * Int(dim) * Int(dim)
+                let tmp_ptr = tmp_wq[l]
+                
+                if let tmp_ptr = tmp_ptr {
+                    let wq_elem = wq_ptr[idx]
+                    let tmp_wq_elem = tmp_ptr[idx]
+                    
+                    if wq_elem != tmp_wq_elem {
+                        print("wq_elem[\(idx)]:\(wq_ptr[idx]) != tmp_wq_elem[\(idx)]:\(tmp_ptr[idx])")
+                        
+                        idx = idx - 1
+                        print("wq_elem[\(idx)]:\(wq_ptr[idx]),tmp_wq_elem[\(idx)]:\(tmp_ptr[idx])")
+
+                        idx = idx - 1
+                        print("wq_elem[\(idx)]:\(wq_ptr[idx]),tmp_wq_elem[\(idx)]:\(tmp_ptr[idx])")
+                    }else{
+//                        print("wq_elem[\(idx)]:\(wq_elem) == tmp_wq_elem[\(idx)]:\(tmp_wq_elem)")
+                    }
+                }
+            }        
+        }
+//        for (i = 0; i < d; i++) {
+//            float val = 0.0f;
+//            for (int j = 0; j < n; j++) {
+//                val += w[i * n + j] * x[j];
+//            }
+//            xout[i] = val;
+//        }
+        /// 👈
+        
         matmul(s.q, x, w.wq + l * Int(dim) * Int(dim), Int32(dim), Int32(dim))
         matmul(s.k, x, w.wk + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
         matmul(s.v, x, w.wv + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
         
         // 对比把s.q 和tmp_q[l]的每一个元素进行对比
+        /// [4]🟡
 
         for q_idx in 0..<Int(dim) {
             if let q = s.q, let tmp_q_array = tmp_q[l]  {
                 let q_element = q + q_idx
                 let tmp_q_element = tmp_q_array + q_idx
                 if tmp_q_element.pointee == q_element.pointee {
-//                    print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
+                    print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
                 } else {
-//                    print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
+                    print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
                 }
             }else{
-//                print("swift[xiaoxiao]q:\(s.q),tmp_q[l]:\(tmp_q[l])")
+                print("swift[xiaoxiao]q:\(s.q),tmp_q[l]:\(tmp_q[l])")
             }
         }
         // 对比把s.k 和tmp_k[l]的每一个元素进行对比
@@ -949,10 +1100,10 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
                 if tmp_k_element.pointee == k_element.pointee {
 //                    print("swift[xiaoxiao]k_element:\(k_element.pointee),tmp_k_element:\(tmp_k_element.pointee)")
                 } else {
-//                    print("swift[xiaoxiao]k_element:\(k_element.pointee),tmp_k_element:\(tmp_k_element.pointee)")
+                    print("swift[xiaoxiao]k_element:\(k_element.pointee),tmp_k_element:\(tmp_k_element.pointee)")
                 }
             }else{
-//                print("swift[xiaoxiao]k:\(s.k),tmp_k[l]:\(String(describing: tmp_k[l]))")
+                print("swift[xiaoxiao]k:\(s.k),tmp_k[l]:\(String(describing: tmp_k[l]))")
             }
         }
       
@@ -964,10 +1115,10 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
                 if tmp_v_element.pointee == v_element.pointee {
 //                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
                 } else {
-//                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
+                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
                 }
             }else{
-//                print("swift[xiaoxiao]v:\(s.v),tmp_v[l]:\(tmp_v[l])")
+                print("swift[xiaoxiao]v:\(s.v),tmp_v[l]:\(tmp_v[l])")
             }
         }
 

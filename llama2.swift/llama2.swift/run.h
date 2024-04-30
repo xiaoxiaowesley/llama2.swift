@@ -95,11 +95,20 @@ void matmul(float* xout, float* x, float* w, int n, int d);
 void softmax(float* x, int size);
 float* forward(Transformer* transformer, int token, int pos);
 
+// ✅
 extern float * temp_x;
 extern int dim_sizeof_x;
+// ✅
+extern float** tmp_xb;
+//
+extern float** tmp_wq; // (layer, dim, n_heads * head_size)
+extern float** tmp_wk; // (layer, dim, n_kv_heads * head_size)
+extern float** tmp_wv; // (layer, dim, n_kv_heads * head_size)
+extern float** tmp_wo; // (layer, n_heads * head_size, dim)
 
+
+extern int* tmp_loff;
 extern float** tmp_q;
 extern float** tmp_k;
 extern float** tmp_v;
-extern float** tmp_xb;
 #endif

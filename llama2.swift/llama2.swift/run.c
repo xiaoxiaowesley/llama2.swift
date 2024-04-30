@@ -19,12 +19,22 @@
     #include <unistd.h>
     #include <sys/mman.h>
 #endif
-
+//
 float * temp_x = NULL;
 int dim_sizeof_x = 0;
 
 
+int* tmp_loff;
+
 float** tmp_xb;
+
+//
+float** tmp_wq; // (layer, dim, n_heads * head_size)
+float** tmp_wk; // (layer, dim, n_kv_heads * head_size)
+float** tmp_wv; // (layer, dim, n_kv_heads * head_size)
+float** tmp_wo; // (layer, n_heads * head_size, dim)
+
+
 float** tmp_q;
 float** tmp_k;
 float** tmp_v;
@@ -69,19 +79,19 @@ void memory_map_weights(TransformerWeights *w, Config* p, float* ptr, int shared
     unsigned long long n_layers = p->n_layers;
     w->token_embedding_table = ptr;
     ptr += p->vocab_size * p->dim;
-    w->rms_att_weight = ptr;
+    w->rms_att_weight = ptr;// 🟡
     ptr += n_layers * p->dim;
-    w->wq = ptr;
+    w->wq = ptr;// 🟡
     ptr += n_layers * p->dim * (p->n_heads * head_size);
-    w->wk = ptr;
+    w->wk = ptr;// 🟡
     ptr += n_layers * p->dim * (p->n_kv_heads * head_size);
-    w->wv = ptr;
+    w->wv = ptr;// 🟡
     ptr += n_layers * p->dim * (p->n_kv_heads * head_size);
-    w->wo = ptr;
+    w->wo = ptr;// 🟡
     ptr += n_layers * (p->n_heads * head_size) * p->dim;
     w->rms_ffn_weight = ptr;
     ptr += n_layers * p->dim;
-    w->w1 = ptr;
+    w->w1 = ptr;// 🟡
     ptr += n_layers * p->dim * p->hidden_dim;
     w->w2 = ptr;
     ptr += n_layers * p->hidden_dim * p->dim;
@@ -165,6 +175,10 @@ void softmax(float* x, int size) {
         x[i] /= sum;
     }
 }
+
+// 矩阵 w （维度为 d x n） 和 向量 x (维度为 n x 1) 的乘积
+// 出的 xout 是乘积的结果，其维度为 d x 1，即一个 d 行、1 列的列向量
+// n 表示向量 x 的长度和矩阵 w 的列数，d 表示矩阵 w 的行数。
 void matmul(float* xout, float* x, float* w, int n, int d) {
     // W (d,n) @ x (n,) -> xout (d,)
     // by far the most amount of time is spent inside this little function
@@ -193,11 +207,11 @@ float* forward(Transformer* transformer, int token, int pos) {
     int head_size = dim / p->n_heads;
 
     //打印
-    printf("c[xiaoxiao]dim:%d\n",dim);
-    printf("c[xiaoxiao]kv_dim:%d\n",kv_dim);
-    printf("c[xiaoxiao]kv_mul:%d\n",kv_mul);
-    printf("c[xiaoxiao]hidden_dim:%d\n",hidden_dim);
-    printf("c[xiaoxiao]head_size:%d\n",head_size);
+//    printf("c[xiaoxiao]dim:%d\n",dim);
+//    printf("c[xiaoxiao]kv_dim:%d\n",kv_dim);
+//    printf("c[xiaoxiao]kv_mul:%d\n",kv_mul);
+//    printf("c[xiaoxiao]hidden_dim:%d\n",hidden_dim);
+//    printf("c[xiaoxiao]head_size:%d\n",head_size);
 
 
 
@@ -210,8 +224,9 @@ float* forward(Transformer* transformer, int token, int pos) {
     
     memcpy(x, content_row, dim*sizeof(*x));
 
-    temp_x = x;
     dim_sizeof_x = dim*sizeof(*x);
+    temp_x = malloc(dim*sizeof(*x));
+    memcpy(temp_x, x, dim*sizeof(*x));    
 
 
     tmp_q = malloc(p->n_layers * sizeof(float*));
@@ -219,31 +234,64 @@ float* forward(Transformer* transformer, int token, int pos) {
     tmp_v = malloc(p->n_layers * sizeof(float*));
     tmp_xb = malloc(p->n_layers * sizeof(float*));
 
+    tmp_wq = malloc(p->n_layers * p->dim * (p->n_heads * head_size)); // (layer, dim, n_heads * head_size)
+    tmp_wk = malloc(p->n_layers * p->dim * (p->n_kv_heads * head_size)); // (layer, dim, n_kv_heads * head_size)
+    tmp_wv = malloc(p->n_layers * p->dim * (p->n_kv_heads * head_size)); // (layer, dim, n_kv_heads * head_size)
+    tmp_wo = malloc(p->n_layers * (p->n_heads * head_size) * p->dim); // (layer, n_heads * head_size, dim)
+
+    
+    tmp_loff = malloc(p->n_layers * sizeof(int));    
+
     // forward all the layers
     for(unsigned long long l = 0; l < p->n_layers; l++) {
 
         // attention rmsnorm
         rmsnorm(s->xb, x, w->rms_att_weight + l*dim, dim);
+        
+        /// [1]🟡 ✅
         tmp_xb[l] = malloc(dim*sizeof(float));
         memcpy(tmp_xb[l], s->xb, dim*sizeof(float));
+        /// 👈
 
         // key and value point to the kv cache
         int loff = l * p->seq_len * kv_dim; // kv cache layer offset for convenience
         s->k = s->key_cache + loff + pos * kv_dim;
         s->v = s->value_cache + loff + pos * kv_dim;
 
+        /// [2]🟡 ✅
+        tmp_loff[l] = loff;
+        /// 👈
+        
+        /// [3]🟡
+        tmp_wq[l] = malloc(p->dim * (p->n_heads * head_size)); // (layer, dim, n_heads * head_size)
+        tmp_wk[l] = malloc(p->dim * (p->n_kv_heads * head_size)); // (layer, dim, n_kv_heads * head_size)
+        tmp_wv[l] = malloc(p->dim * (p->n_kv_heads * head_size)); // (layer, dim, n_kv_heads * head_size)
+
+        memcpy(tmp_wq[l], w->wq + l*dim*dim, dim*dim*sizeof(float));
+        memcpy(tmp_wk[l], w->wk + l*dim*kv_dim, dim*kv_dim*sizeof(float));
+        memcpy(tmp_wv[l], w->wv + l*dim*kv_dim, dim*kv_dim*sizeof(float));
+        /// 👈
+        
+
         // qkv matmuls for this position
         matmul(s->q, s->xb, w->wq + l*dim*dim, dim, dim);
+        //打印 w->wq[24576]
+        printf("c[xiaoxiao]w->wq[24575]:%f\n",w->wq[24575]);
+        printf("c[xiaoxiao]w->wq[24576]:%f\n",w->wq[24576]);
+        printf("c[xiaoxiao]w->wq[24577]:%f\n",w->wq[24577]);
+        
         matmul(s->k, s->xb, w->wk + l*dim*kv_dim, dim, kv_dim);
         matmul(s->v, s->xb, w->wv + l*dim*kv_dim, dim, kv_dim);
-
+        
+       
+        /// [4]🟡
         tmp_q[l] = malloc(dim*sizeof(float));
         tmp_k[l] = malloc(kv_dim*sizeof(float));
         tmp_v[l] = malloc(kv_dim*sizeof(float));
         memcpy(tmp_q[l], s->q, dim*sizeof(float));
         memcpy(tmp_k[l], s->k, kv_dim*sizeof(float));
         memcpy(tmp_v[l], s->v, kv_dim*sizeof(float));
-
+        /// 👈
 
         // RoPE relative positional encoding: complex-valued rotate q and k in each head
         for (int i = 0; i < dim; i+=2) {
