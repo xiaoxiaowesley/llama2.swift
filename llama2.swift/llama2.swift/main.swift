@@ -959,11 +959,11 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
         }
     }
     
-    print("最开始的时候!!对比两个transform的weight")
-    print("w.wq[24575]:\(w.wq[24575])")
-    print("w2.wq[24575]:\(w2.wq[24575])")
-    print("w.wq[24576]:\(w.wq[24576])")
-    print("w2.wq[24576]:\(w2.wq[24576])")
+//    print("最开始的时候!!对比两个transform的weight")
+//    print("w.wq[24575]:\(w.wq[24575])")
+//    print("w2.wq[24575]:\(w2.wq[24575])")
+//    print("w.wq[24576]:\(w.wq[24576])")
+//    print("w2.wq[24576]:\(w2.wq[24576])")
 
     
     // copy the token embedding into x
