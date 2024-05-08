@@ -105,4 +105,6 @@ extern int* tmp_loff;
 extern float** tmp_q;
 extern float** tmp_k;
 extern float** tmp_v;
+
+extern float * token1_x;
 #endif

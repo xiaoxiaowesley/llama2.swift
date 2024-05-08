@@ -32,6 +32,9 @@ float** tmp_q;
 float** tmp_k;
 float** tmp_v;
 
+float * token1_x = NULL;
+
+
 void malloc_run_state(RunState* s, Config* p) {
     // we calloc instead of malloc to keep valgrind happy
     int kv_dim = (p->dim * p->n_kv_heads) / p->n_heads;
@@ -219,7 +222,11 @@ float* forward(Transformer* transformer, int token, int pos) {
 
     dim_sizeof_x = dim*sizeof(*x);
     temp_x = malloc(dim*sizeof(*x));
-    memcpy(temp_x, x, dim*sizeof(*x));    
+    memcpy(temp_x, x, dim*sizeof(*x));
+    if(token == 1){
+        token1_x = malloc(dim*sizeof(*x));
+        memcpy(token1_x, x, dim*sizeof(*x));
+    }
 
 
     tmp_q = malloc(p->n_layers * sizeof(float*));
@@ -231,6 +238,7 @@ float* forward(Transformer* transformer, int token, int pos) {
 
     // forward all the layers
     for(unsigned long long l = 0; l < p->n_layers; l++) {
+//        printf("[c][l:%llu]x[0]:%f\n",l,x[0]);
 
         // attention rmsnorm
         rmsnorm(s->xb, x, w->rms_att_weight + l*dim, dim);
@@ -251,6 +259,7 @@ float* forward(Transformer* transformer, int token, int pos) {
            
         // qkv matmuls for this position
         matmul(s->q, s->xb, w->wq + l*dim*dim, dim, dim);
+//        printf("[c]s->q[0]:%f\n",s->q[0]);
         
         matmul(s->k, s->xb, w->wk + l*dim*kv_dim, dim, kv_dim);
         matmul(s->v, s->xb, w->wv + l*dim*kv_dim, dim, kv_dim);

@@ -970,6 +970,19 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
     
     let content_row = w.token_embedding_table + token * Int(dim)
     memcpy(x,content_row,Int(dim) * MemoryLayout<Float>.size)
+    
+    if token == 1 {
+        
+        // 对比token1_x
+        for i in 0..<Int(dim) {
+            if let token1_x = token1_x , let x = x {
+                if token1_x[i] != x[i] {
+                    print("swift[xiaoxiao]token1_x:\(token1_x[i]),x:\(x[i])")
+                }
+            }
+        }
+
+    }
     // ✅
     let swift_dim_sizeof_x = MemoryLayout<Float>.size * Int(dim)
     if swift_dim_sizeof_x == dim_sizeof_x {
@@ -993,6 +1006,7 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
 
     for l in 0..<Int(p.n_layers) {
         // attention rmsnorm
+        print("l:x[0]=\(String(describing: x?[0]))")
         rmsnorm( s.xb,  x, w.rms_att_weight + l * Int(dim), Int32(Int(dim)))
         
         // ✅ [1] tmp_xb
@@ -1006,8 +1020,6 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
                 } else {
                     print("swift[xiaoxiao]xb_element:\(xb_element.pointee),tmp_xb_element:\(tmp_xb_element.pointee)")
                 }
-            }else{
-                print("swift[xiaoxiao]xb:\(s.xb),tmp_xb[l]:\(tmp_xb[l])")
             }
         }
 
@@ -1028,7 +1040,11 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
 
         // qkv matmuls for this position
         
+        // s.q的长度是dim
         matmul(s.q, x, w.wq + l * Int(dim) * Int(dim), Int32(dim), Int32(dim))
+        let fist = s.q[0]
+        print("swift[xiaoxiao]fist:\(fist)")
+
         matmul(s.k, x, w.wk + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
         matmul(s.v, x, w.wv + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
         
@@ -1039,7 +1055,7 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
                 let q_element = q + q_idx
                 let tmp_q_element = tmp_q_array + q_idx
                 if tmp_q_element.pointee == q_element.pointee {
-                    print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
+//                    print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
                 } else {
                     print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
                 }
@@ -1070,7 +1086,7 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
                 if tmp_v_element.pointee == v_element.pointee {
 //                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
                 } else {
-                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
+//                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
                 }
             }else{
                 print("swift[xiaoxiao]v:\(s.v),tmp_v[l]:\(tmp_v[l])")
