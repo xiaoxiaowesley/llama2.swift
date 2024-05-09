@@ -843,9 +843,9 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
     // ptr 是float*指针，是一个地址，需要转换为数组
     var logits: [Float] = []
     let ptr = forward(&transformer2, Int32(token), Int32(pos))
-    for i in 0..<Int(transformer2.config.vocab_size) {
-        logits.append(ptr![i])
-    }
+//    for i in 0..<Int(transformer2.config.vocab_size) {
+//        logits.append(ptr![i])
+//    }
 
     /// 开始
     let p: Config = transformer.config
@@ -1006,7 +1006,7 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
 
     for l in 0..<Int(p.n_layers) {
         // attention rmsnorm
-        print("l:x[0]=\(String(describing: x?[0]))")
+//        print("l:x[0]=\(String(describing: x?[0]))")
         rmsnorm( s.xb,  x, w.rms_att_weight + l * Int(dim), Int32(Int(dim)))
         
         // ✅ [1] tmp_xb
@@ -1015,7 +1015,8 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
             if let xb = s.xb, let tmp_xb_array = tmp_xb[l]  {
                 let xb_element = xb + xb_idx
                 let tmp_xb_element = tmp_xb_array + xb_idx
-                if tmp_xb_element.pointee == xb_element.pointee {
+                if abs(tmp_xb_element.pointee - xb_element.pointee) < 0.001 {
+
 //                    print("swift[xiaoxiao]xb_element:\(xb_element.pointee) == tmp_xb_element:\(tmp_xb_element.pointee)")
                 } else {
                     print("swift[xiaoxiao]xb_element:\(xb_element.pointee),tmp_xb_element:\(tmp_xb_element.pointee)")
@@ -1028,9 +1029,9 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
         let loff = Int(l) * Int(p.seq_len) * Int(kv_dim)
         // 
         if tmp_loff[l] != loff {
-            print("swift[xiaoxiao]tmp_loff[l]:\(tmp_loff[l]),loff:\(loff)")
+//            print("swift[xiaoxiao]tmp_loff[l]:\(tmp_loff[l]),loff:\(loff)")
         }else{
-            print("swift[xiaoxiao]tmp_loff[l]:\(tmp_loff[l]) == loff:\(loff)")
+//            print("swift[xiaoxiao]tmp_loff[l]:\(tmp_loff[l]) == loff:\(loff)")
         }
         
         // k的长度是 p->n_layers * p->seq_len * kv_dim 比如l=0,就是 0~n_layers*seq_len*kv_dim
@@ -1041,57 +1042,81 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
         // qkv matmuls for this position
         
         // s.q的长度是dim
-        matmul(s.q, x, w.wq + l * Int(dim) * Int(dim), Int32(dim), Int32(dim))
-        let fist = s.q[0]
-        print("swift[xiaoxiao]fist:\(fist)")
-
-        matmul(s.k, x, w.wk + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
-        matmul(s.v, x, w.wv + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
+        matmul(s.q, s.xb, w.wq + l * Int(dim) * Int(dim), Int32(dim), Int32(dim))
+        matmul(s.k, s.xb, w.wk + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
+        matmul(s.v, s.xb, w.wv + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
         
-        // 对比把s.q 和tmp_q[l]的每一个元素进行对比
-        /// [3]🟡
-        for q_idx in 0..<Int(dim) {
-            if let q = s.q, let tmp_q_array = tmp_q[l]  {
-                let q_element = q + q_idx
-                let tmp_q_element = tmp_q_array + q_idx
-                if tmp_q_element.pointee == q_element.pointee {
+        if l == 0 && token == 1 {
+            // 对比tmp_q_1
+            for i in 0..<Int(dim) {
+                if let token1_q = tmp_q_1 , let s_q = s.q {
+                    if token1_q[i] != s_q[i] {
+                        print("swift[xiaoxiao]token1_q:\(token1_q[i]),s_q:\(s_q[i])")
+                    }
+                }
+            }
+            // 对比tmp_k_1
+            for i in 0..<Int(kv_dim) {
+                if let token1_k = tmp_k_1 , let s_k = s.k {
+                    if token1_k[i] != s_k[i] {
+                        print("swift[xiaoxiao]token1_k:\(token1_k[i]),s_k:\(s_k[i])")
+                    }
+                }
+            }
+            // 对比tmp_v_1
+            for i in 0..<Int(kv_dim) {
+                if let token1_v = tmp_v_1 , let s_v = s.v {
+                    if token1_v[i] != s_v[i] {
+                        print("swift[xiaoxiao]token1_v:\(token1_v[i]),s_v:\(s_v[i])")
+                    }
+                }
+            }
+        }
+
+//        // 对比把s.q 和tmp_q[l]的每一个元素进行对比
+//        /// [3]🟡
+//        for q_idx in 0..<Int(dim) {
+//            if let q = s.q, let tmp_q_array = tmp_q[l]  {
+//                let q_element = q + q_idx
+//                let tmp_q_element = tmp_q_array + q_idx
+//                if tmp_q_element.pointee == q_element.pointee {
+////                    print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
+//                } else {
 //                    print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
-                } else {
-                    print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
-                }
-            }else{
-                print("swift[xiaoxiao]q:\(s.q),tmp_q[l]:\(tmp_q[l])")
-            }
-        }
-        // 对比把s.k 和tmp_k[l]的每一个元素进行对比
-        for k_idx in 0..<Int(kv_dim) {
-            if let k = s.k, let tmp_k_array = tmp_k[l]  {
-                let k_element = k + k_idx
-                let tmp_k_element = tmp_k_array + k_idx
-                if tmp_k_element.pointee == k_element.pointee {
+//                }
+//            }else{
+//                print("swift[xiaoxiao]q:\(s.q),tmp_q[l]:\(tmp_q[l])")
+//            }
+//        }
+//        // 对比把s.k 和tmp_k[l]的每一个元素进行对比
+//        for k_idx in 0..<Int(kv_dim) {
+//            if let k = s.k, let tmp_k_array = tmp_k[l]  {
+//                let k_element = k + k_idx
+//                let tmp_k_element = tmp_k_array + k_idx
+//                if tmp_k_element.pointee == k_element.pointee {
+////                    print("swift[xiaoxiao]k_element:\(k_element.pointee),tmp_k_element:\(tmp_k_element.pointee)")
+//                } else {
 //                    print("swift[xiaoxiao]k_element:\(k_element.pointee),tmp_k_element:\(tmp_k_element.pointee)")
-                } else {
-                    print("swift[xiaoxiao]k_element:\(k_element.pointee),tmp_k_element:\(tmp_k_element.pointee)")
-                }
-            }else{
-                print("swift[xiaoxiao]k:\(s.k),tmp_k[l]:\(String(describing: tmp_k[l]))")
-            }
-        }
+//                }
+//            }else{
+//                print("swift[xiaoxiao]k:\(s.k),tmp_k[l]:\(String(describing: tmp_k[l]))")
+//            }
+//        }
       
         // 对比把s.v 和tmp_v[l]的每一个元素进行对比
-        for v_idx in 0..<Int(kv_dim) {
-            if let v = s.v, let tmp_v_array = tmp_v[l]  {
-                let v_element = v + v_idx
-                let tmp_v_element = tmp_v_array + v_idx
-                if tmp_v_element.pointee == v_element.pointee {
-//                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
-                } else {
-//                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
-                }
-            }else{
-                print("swift[xiaoxiao]v:\(s.v),tmp_v[l]:\(tmp_v[l])")
-            }
-        }
+//        for v_idx in 0..<Int(kv_dim) {
+//            if let v = s.v, let tmp_v_array = tmp_v[l]  {
+//                let v_element = v + v_idx
+//                let tmp_v_element = tmp_v_array + v_idx
+//                if tmp_v_element.pointee == v_element.pointee {
+////                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
+//                } else {
+////                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
+//                }
+//            }else{
+//                print("swift[xiaoxiao]v:\(s.v),tmp_v[l]:\(tmp_v[l])")
+//            }
+//        }
 
 
         // RoPE relative positional encoding: complex-valued rotate q and k in each head
@@ -1109,6 +1134,25 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
                     let v1 = vec[i + 1]
                     vec[i] = v0 * fcr - v1 * fci
                     vec[i + 1] = v0 * fci + v1 * fcr
+                }
+            }
+        }
+        
+        if l == 0 && token == 1 {
+            // 对比tmp_q_1_rotate
+            for i in 0..<Int(dim) {
+                if let token1_q = tmp_q_1 , let s_q = s.q {
+                    if token1_q[i] != s_q[i] {
+                        print("swift[xiaoxiao]token1_q:\(token1_q[i]),s_q:\(s_q[i])")
+                    }
+                }
+            }
+            // 对比tmp_k_1_rotate
+            for i in 0..<Int(kv_dim) {
+                if let token1_k = tmp_k_1_rotate , let s_k = s.k {
+                    if token1_k[i] != s_k[i] {
+                        print("swift[xiaoxiao]token1_k:\(token1_k[i]),s_k:\(s_k[i])")
+                    }
                 }
             }
         }
@@ -1139,6 +1183,11 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
 
             // weighted sum of the values, store back into xb
             let xb = s.xb + h * Int(head_size)
+            // memset(xb, 0, head_size * sizeof(float));
+            for i in 0..<Int(head_size) {
+                xb[i] = 0.0
+            }
+            
             for t in 0...pos {
                 // get the value vector for this head and at this timestep
                 let v = s.value_cache + loff + t * Int(kv_dim) + h / Int(kv_mul) * Int(head_size)
@@ -1200,7 +1249,9 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
     // for循环遍历p.n_layers
     
     /// 结束
-    
+    for i in 0..<Int(transformer2.config.vocab_size) {
+           logits.append(s.logits![i])
+       }
 
     return logits
 }

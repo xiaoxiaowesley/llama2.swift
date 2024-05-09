@@ -34,6 +34,14 @@ float** tmp_v;
 
 float * token1_x = NULL;
 
+float* tmp_q_1;
+float* tmp_k_1;
+float* tmp_v_1;
+
+
+float* tmp_q_1_rotate;
+float* tmp_k_1_rotate;
+float* tmp_v_1_rotate;
 
 void malloc_run_state(RunState* s, Config* p) {
     // we calloc instead of malloc to keep valgrind happy
@@ -259,11 +267,21 @@ float* forward(Transformer* transformer, int token, int pos) {
            
         // qkv matmuls for this position
         matmul(s->q, s->xb, w->wq + l*dim*dim, dim, dim);
-//        printf("[c]s->q[0]:%f\n",s->q[0]);
-        
         matmul(s->k, s->xb, w->wk + l*dim*kv_dim, dim, kv_dim);
         matmul(s->v, s->xb, w->wv + l*dim*kv_dim, dim, kv_dim);
-        
+        if (l == 0 && token == 1) {
+            
+            tmp_q_1 = malloc(dim* sizeof(float));
+            memcpy(tmp_q_1, s->q, dim*sizeof(float));
+            
+            tmp_k_1 = malloc(kv_dim* sizeof(float));
+            memcpy(tmp_k_1, s->k, kv_dim*sizeof(float));
+            
+            tmp_v_1 = malloc(kv_dim* sizeof(float));
+            memcpy(tmp_v_1, s->v, kv_dim*sizeof(float));
+            
+            
+        }
        
         /// [3]🟡
         tmp_q[l] = malloc(dim*sizeof(float));
@@ -289,6 +307,18 @@ float* forward(Transformer* transformer, int token, int pos) {
                 vec[i]   = v0 * fcr - v1 * fci;
                 vec[i+1] = v0 * fci + v1 * fcr;
             }
+        }
+        
+        // ✅
+        if (l == 0 && token == 1) {
+            
+            tmp_q_1_rotate = malloc(dim* sizeof(float));
+            memcpy(tmp_q_1_rotate, s->q, dim*sizeof(float));
+            
+            tmp_k_1_rotate = malloc(kv_dim* sizeof(float));
+            memcpy(tmp_k_1_rotate, s->k, kv_dim*sizeof(float));
+          
+            
         }
 
         // multihead attention. iterate over all heads

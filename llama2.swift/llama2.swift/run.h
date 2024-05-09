@@ -107,4 +107,14 @@ extern float** tmp_k;
 extern float** tmp_v;
 
 extern float * token1_x;
+
+extern float* tmp_q_1;
+extern float* tmp_k_1;
+extern float* tmp_v_1;
+
+
+extern float* tmp_q_1_rotate;
+extern float* tmp_k_1_rotate;
+extern float* tmp_v_1_rotate;
+
 #endif
