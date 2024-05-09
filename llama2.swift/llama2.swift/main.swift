@@ -310,20 +310,51 @@ func softmax(_ x: inout [Float]) {
     }
 }
 
-// func matmul(_ xout: inout [Float], _ x: [Float], _ w: [Float], _ n: Int, _ d: Int) {
-//    // W (d,n) @ x (n,) -> xout (d,)
-//    // by far the most amount of time is spent inside this little function
-//    let lock = NSLock()
-//    DispatchQueue.concurrentPerform(iterations: d) { i in
-//        var val: Float = 0.0
-//        for j in 0..<n {
-//            val += w[i * n + j] * x[j]
-//        }
-//        lock.lock()
-//        xout[i] = val
-//        lock.unlock()
-//    }
-//}
+ func matmul_swift( _ x: [Float], _ w: [Float], _ n: Int, _ d: Int) -> [Float] {
+    
+    //创建一个长度为d的数组
+     var xout:[Float] = Array(repeating: 0.0, count: d)
+
+    // W (d,n) @ x (n,) -> xout (d,)
+    // by far the most amount of time is spent inside this little function
+    let lock = NSLock()
+    DispatchQueue.concurrentPerform(iterations: d) { i in
+        var val: Float = 0.0
+        for j in 0..<n {
+            val += w[i * n + j] * x[j]
+        }
+        lock.lock()
+        xout[i] = val
+        lock.unlock()
+    }
+    return xout
+}
+
+func matmul (_ xout: UnsafeMutablePointer<Float>!,
+               _ x: UnsafeMutablePointer<Float>!,
+               _ w: UnsafeMutablePointer<Float>!,
+               _ n: Int32,
+               _ d: Int32){
+    
+    // 把x,w,转成[Float]
+    var xArray : [Float] = []
+    for i in 0..<n {
+        xArray.append(x[Int(i)])
+    }
+    var wArray : [Float] = []
+    for i in 0..<(n*d) {
+        wArray.append(w[Int(i)])
+    }
+
+    // 调用swift的matmul
+    let xoutArray = matmul_swift(xArray, wArray, Int(n), Int(d))
+    
+    for i in 0..<d {
+        xout[Int(i)] = xoutArray[Int(i)]
+    }
+}
+
+
 
 //func forward(transformer: inout Transformer, token: Int, pos: Int) -> [Float] {
 //    // a few convenience variables
@@ -884,7 +915,6 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
         matmul(s.k, s.xb, w.wk + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
         matmul(s.v, s.xb, w.wv + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
       
-
 
         // RoPE relative positional encoding: complex-valued rotate q and k in each head
         for i in stride(from: 0, to: Int(dim), by: 2) {
