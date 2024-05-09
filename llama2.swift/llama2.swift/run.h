@@ -90,8 +90,5 @@ void build_transformer(Transformer *t, char* checkpoint_path) ;
 
 void free_transformer(Transformer* t) ;
 
-void rmsnorm(float* o, float* x, float* weight, int size);
-void softmax(float* x, int size);
-
 
 #endif

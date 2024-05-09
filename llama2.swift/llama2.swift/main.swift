@@ -277,21 +277,42 @@ import Foundation
 
 // ----------------------------------------------------------------------------
 // neural net blocks; the dynamics of the Transformer
-//
-//func rmsnorm(o: inout [Float], x: [Float], weight: [Float], size: Int) {
-//    // calculate sum of squares
-//    var ss: Float = 0.0
-//    for j in 0..<size {
-//        ss += x[j] * x[j]
-//    }
-//    ss /= Float(size)
-//    ss += 1e-5
-//    ss = 1.0 / sqrt(ss)
-//    // normalize and scale
-//    for j in 0..<size {
-//        o[j] = weight[j] * (ss * x[j])
-//    }
-//}
+
+func rmsnorm_swift(o: inout [Float], x: [Float], weight: [Float], size: Int) {
+    // calculate sum of squares
+    var ss: Float = 0.0
+    for j in 0..<size {
+        ss += x[j] * x[j]
+    }
+    ss /= Float(size)
+    ss += 1e-5
+    ss = 1.0 / sqrt(ss)
+    // normalize and scale
+    for j in 0..<size {
+        o[j] = weight[j] * (ss * x[j])
+    }
+}
+
+func rmsnorm_c(_ o: UnsafeMutablePointer<Float>!, _  X: UnsafeMutablePointer<Float>!, _  weight: UnsafeMutablePointer<Float>!, _
+               size: Int32){
+    // 将X转成[Float]
+    var xArray : [Float] = []
+    for i in 0..<size {
+        xArray.append(X[Int(i)])
+    }
+    // 将weight转成[Float]
+    var weightArray : [Float] = []
+    for i in 0..<size {
+        weightArray.append(weight[Int(i)])
+    }
+    // 调用swift的rmsnorm
+    var oArray = Array(repeating: Float(0.0), count: Int(size))
+    rmsnorm_swift(o: &oArray, x: xArray, weight: weightArray, size: Int(size))
+    for i in 0..<size {
+        o[Int(i)] = oArray[Int(i)]
+    }
+    
+}
 
 func softmax(_ x: inout [Float]) {
     // find max value (for numerical stability)
@@ -309,6 +330,20 @@ func softmax(_ x: inout [Float]) {
         x[i] /= sum
     }
 }
+
+func softmax_c(_ x: UnsafeMutablePointer<Float>!, _ size:Int32) {
+    // 将x转成[Float]
+    var xArray : [Float] = []
+    for i in 0..<size {
+        xArray.append(x[Int(i)])
+    }
+    softmax(&xArray)
+    for i in 0..<size {
+        x[Int(i)] = xArray[Int(i)]
+    }
+}
+
+
 
  func matmul_swift( _ x: [Float], _ w: [Float], _ n: Int, _ d: Int) -> [Float] {
     
@@ -897,8 +932,7 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
 
     for l in 0..<Int(p.n_layers) {
         // attention rmsnorm
-        rmsnorm( s.xb,  x, w.rms_att_weight + l * Int(dim), Int32(Int(dim)))
-        
+        rmsnorm_c( s.xb,  x, w.rms_att_weight + l * Int(dim), Int32(Int(dim)))
 
         //key and value point to the kv cache
         let loff = Int(l) * Int(p.seq_len) * Int(kv_dim)
@@ -957,7 +991,8 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
             }
 
             // softmax the scores to get attention weights, from 0..pos inclusively
-            softmax(att,Int32(pos + 1))
+            softmax_c(att,Int32(pos + 1))
+            
 
             // weighted sum of the values, store back into xb
             let xb = s.xb + h * Int(head_size)
@@ -987,7 +1022,7 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
             }
         }
         // ffn rmsnorm
-        rmsnorm(s.xb, x, w.rms_ffn_weight + l * Int(dim), Int32(dim))
+        rmsnorm_c(s.xb, x, w.rms_ffn_weight + l * Int(dim), Int32(dim))
 
 
         // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
@@ -1018,7 +1053,7 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
     }
 
     // final rmsnorm
-    rmsnorm(x, x, w.rms_final_weight, Int32(dim))
+    rmsnorm_c(x, x, w.rms_final_weight, Int32(dim))
 
     // classifier into logits  //TODO:待确认
     matmul(s.logits, x, w.wcls, Int32(p.dim), Int32(p.vocab_size))
