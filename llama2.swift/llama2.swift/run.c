@@ -19,29 +19,6 @@
     #include <unistd.h>
     #include <sys/mman.h>
 #endif
-//
-float * temp_x = NULL;
-int dim_sizeof_x = 0;
-
-
-int* tmp_loff;
-
-float** tmp_xb;
-
-float** tmp_q;
-float** tmp_k;
-float** tmp_v;
-
-float * token1_x = NULL;
-
-float* tmp_q_1;
-float* tmp_k_1;
-float* tmp_v_1;
-
-
-float* tmp_q_1_rotate;
-float* tmp_k_1_rotate;
-float* tmp_v_1_rotate;
 
 void malloc_run_state(RunState* s, Config* p) {
     // we calloc instead of malloc to keep valgrind happy
@@ -228,69 +205,22 @@ float* forward(Transformer* transformer, int token, int pos) {
     
     memcpy(x, content_row, dim*sizeof(*x));
 
-    dim_sizeof_x = dim*sizeof(*x);
-    temp_x = malloc(dim*sizeof(*x));
-    memcpy(temp_x, x, dim*sizeof(*x));
-    if(token == 1){
-        token1_x = malloc(dim*sizeof(*x));
-        memcpy(token1_x, x, dim*sizeof(*x));
-    }
-
-
-    tmp_q = malloc(p->n_layers * sizeof(float*));
-    tmp_k = malloc(p->n_layers * sizeof(float*));
-    tmp_v = malloc(p->n_layers * sizeof(float*));
-    tmp_xb = malloc(p->n_layers * sizeof(float*));
-    
-    tmp_loff = malloc(p->n_layers * sizeof(int));    
 
     // forward all the layers
     for(unsigned long long l = 0; l < p->n_layers; l++) {
-//        printf("[c][l:%llu]x[0]:%f\n",l,x[0]);
 
         // attention rmsnorm
         rmsnorm(s->xb, x, w->rms_att_weight + l*dim, dim);
-        
-        /// [1]🟡 ✅
-        tmp_xb[l] = malloc(dim*sizeof(float));
-        memcpy(tmp_xb[l], s->xb, dim*sizeof(float));
-        /// 👈
 
         // key and value point to the kv cache
         int loff = l * p->seq_len * kv_dim; // kv cache layer offset for convenience
         s->k = s->key_cache + loff + pos * kv_dim;
         s->v = s->value_cache + loff + pos * kv_dim;
-
-        /// [2]🟡 ✅
-        tmp_loff[l] = loff;
-        /// 👈
            
         // qkv matmuls for this position
         matmul(s->q, s->xb, w->wq + l*dim*dim, dim, dim);
         matmul(s->k, s->xb, w->wk + l*dim*kv_dim, dim, kv_dim);
         matmul(s->v, s->xb, w->wv + l*dim*kv_dim, dim, kv_dim);
-        if (l == 0 && token == 1) {
-            
-            tmp_q_1 = malloc(dim* sizeof(float));
-            memcpy(tmp_q_1, s->q, dim*sizeof(float));
-            
-            tmp_k_1 = malloc(kv_dim* sizeof(float));
-            memcpy(tmp_k_1, s->k, kv_dim*sizeof(float));
-            
-            tmp_v_1 = malloc(kv_dim* sizeof(float));
-            memcpy(tmp_v_1, s->v, kv_dim*sizeof(float));
-            
-            
-        }
-       
-        /// [3]🟡
-        tmp_q[l] = malloc(dim*sizeof(float));
-        tmp_k[l] = malloc(kv_dim*sizeof(float));
-        tmp_v[l] = malloc(kv_dim*sizeof(float));
-        memcpy(tmp_q[l], s->q, dim*sizeof(float));
-        memcpy(tmp_k[l], s->k, kv_dim*sizeof(float));
-        memcpy(tmp_v[l], s->v, kv_dim*sizeof(float));
-        /// 👈
 
         // RoPE relative positional encoding: complex-valued rotate q and k in each head
         for (int i = 0; i < dim; i+=2) {
@@ -309,17 +239,6 @@ float* forward(Transformer* transformer, int token, int pos) {
             }
         }
         
-        // ✅
-        if (l == 0 && token == 1) {
-            
-            tmp_q_1_rotate = malloc(dim* sizeof(float));
-            memcpy(tmp_q_1_rotate, s->q, dim*sizeof(float));
-            
-            tmp_k_1_rotate = malloc(kv_dim* sizeof(float));
-            memcpy(tmp_k_1_rotate, s->k, kv_dim*sizeof(float));
-          
-            
-        }
 
         // multihead attention. iterate over all heads
         int h;

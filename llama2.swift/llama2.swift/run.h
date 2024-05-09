@@ -93,28 +93,6 @@ void free_transformer(Transformer* t) ;
 void rmsnorm(float* o, float* x, float* weight, int size);
 void matmul(float* xout, float* x, float* w, int n, int d);
 void softmax(float* x, int size);
-float* forward(Transformer* transformer, int token, int pos);
 
-// ✅
-extern float * temp_x;
-extern int dim_sizeof_x;
-// ✅
-extern float** tmp_xb;
-
-extern int* tmp_loff;
-extern float** tmp_q;
-extern float** tmp_k;
-extern float** tmp_v;
-
-extern float * token1_x;
-
-extern float* tmp_q_1;
-extern float* tmp_k_1;
-extern float* tmp_v_1;
-
-
-extern float* tmp_q_1_rotate;
-extern float* tmp_k_1_rotate;
-extern float* tmp_v_1_rotate;
 
 #endif

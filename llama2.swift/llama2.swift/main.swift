@@ -839,13 +839,9 @@ func timeInMs() -> Int64 {
 }
 
 // transform 前向传播
-func myForward(transformer: inout Transformer,transformer2: inout Transformer,token:Int,pos:Int)->[Float]{
+func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
     // ptr 是float*指针，是一个地址，需要转换为数组
     var logits: [Float] = []
-    let ptr = forward(&transformer2, Int32(token), Int32(pos))
-//    for i in 0..<Int(transformer2.config.vocab_size) {
-//        logits.append(ptr![i])
-//    }
 
     /// 开始
     let p: Config = transformer.config
@@ -856,183 +852,25 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
     // 这是一个Transformer模型的输入，是一个长度为dim的向量
     let x = s.x
     let dim = p.dim
-    // 这是多头注意力机制的维度
     let kv_dim = (p.dim * p.n_kv_heads) / p.n_heads
     let kv_mul = p.n_heads / p.n_kv_heads
     let hidden_dim = p.hidden_dim
     let head_size = dim / p.n_heads
-    //打印
-//    print("swift[xiaoxiao]dim:\(dim)")
-//    print("swift[xiaoxiao]kv_dim:\(kv_dim)")
-//    print("swift[xiaoxiao]kv_mul:\(kv_mul)")
-//    print("swift[xiaoxiao]hidden_dim:\(hidden_dim)")
-//    print("swift[xiaoxiao]head_size:\(head_size)")
-
-    let w2: TransformerWeights = transformer2.weights
-    
-    //✅  对比w2和w的token_embedding_table的每个值
-    for i in 0..<Int(p.vocab_size * dim) {
-        let t1 = w.token_embedding_table[i]
-        let t2 = w2.token_embedding_table[i]
-
-        //t1,t2是浮点数，对比两个浮点数是否相等
-        if t1 != t2 {
-            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
-        }
-    }
-    //对比w2和w的rms_att_weight每个值
-    for i in 0..<Int(p.n_layers * dim) {
-        let t1 = w.rms_att_weight[i]
-        let t2 = w2.rms_att_weight[i]
-        if t1 != t2 {
-            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
-        }
-    }
-    
-    // 对比w2和w的wq每个值
-    for i in 0..<Int( p.n_layers * p.dim * (p.n_heads * head_size)) {
-        let t1 = w.wq[i]
-        let t2 = w2.wq[i]
-        if t1 != t2 {
-            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
-        }
-    }
-    
-    
-    
-    // 对比w2和w的wk每个值
-    for i in 0..<Int(p.n_layers *  p.dim * (p.n_kv_heads * head_size)) {
-        let t1 = w.wk[i]
-        let t2 = w2.wk[i]
-        if t1 != t2 {
-            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
-        }
-    }
-    // 对比w2和w的wv每个值
-    for i in 0..<Int(p.n_layers *  p.dim * (p.n_kv_heads * head_size)) {
-        let t1 = w.wv[i]
-        let t2 = w2.wv[i]
-        if t1 != t2 {
-            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
-        }
-    }
-    // 对比w2和w的wo每个值
-    for i in 0..<Int(p.n_layers * (p.n_heads * head_size) * p.dim) {
-        let t1 = w.wo[i]
-        let t2 = w2.wo[i]
-        if t1 != t2 {
-            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
-        }
-    }
-
-    // 对比w2和w的rms_ffn_weight每个值
-    for i in 0..<Int(p.n_layers * dim) {
-        let t1 = w.rms_ffn_weight[i]
-        let t2 = w2.rms_ffn_weight[i]
-        if t1 != t2 {
-            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
-        }
-    }
-
-    // 对比w2和w的w1每个值
-    for i in 0..<Int(p.n_layers * hidden_dim * dim) {
-        let t1 = w.w1[i]
-        let t2 = w2.w1[i]
-        if t1 != t2 {
-            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
-        }
-    }
-    // 对比w2和w的w2每个值
-    for i in 0..<Int(p.n_layers * dim * hidden_dim) {
-        let t1 = w.w2[i]
-        let t2 = w2.w2[i]
-        if t1 != t2 {
-            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
-        }
-    }
-    // 对比w2和w的w3每个值
-    for i in 0..<Int(p.n_layers * hidden_dim * dim) {
-        let t1 = w.w3[i]
-        let t2 = w2.w3[i]
-        if t1 != t2 {
-            print("swift[xiaoxiao]t1:\(t1),t2:\(t2)")
-        }
-    }
-    
-//    print("最开始的时候!!对比两个transform的weight")
-//    print("w.wq[24575]:\(w.wq[24575])")
-//    print("w2.wq[24575]:\(w2.wq[24575])")
-//    print("w.wq[24576]:\(w.wq[24576])")
-//    print("w2.wq[24576]:\(w2.wq[24576])")
 
     
+
     // copy the token embedding into x
     
     let content_row = w.token_embedding_table + token * Int(dim)
     memcpy(x,content_row,Int(dim) * MemoryLayout<Float>.size)
-    
-    if token == 1 {
-        
-        // 对比token1_x
-        for i in 0..<Int(dim) {
-            if let token1_x = token1_x , let x = x {
-                if token1_x[i] != x[i] {
-                    print("swift[xiaoxiao]token1_x:\(token1_x[i]),x:\(x[i])")
-                }
-            }
-        }
-
-    }
-    // ✅
-    let swift_dim_sizeof_x = MemoryLayout<Float>.size * Int(dim)
-    if swift_dim_sizeof_x == dim_sizeof_x {
-        for d in 0..<Int(dim){
-            if let temp_x = temp_x ,
-                let x = x {
-                let c_x = temp_x + d
-                let s_x = x + d
-                // c_x和s_x都是浮点数，对比两个浮点数是否相等
-                if c_x.pointee != s_x.pointee {
-                    print("swift[xiaoxiao]c_x:\(c_x.pointee),s_x:\(s_x.pointee)")
-                }else {
-//                    print("swift[xiaoxiao]c_x:\(c_x.pointee) == s_x:\(s_x.pointee)")
-                }
-            }
-        }
-
-    }else{
-        print ("swift[xiaoxiao]dim_sizeof_x:\(swift_dim_sizeof_x),dim_sizeof_x:\(dim_sizeof_x)")
-    }
 
     for l in 0..<Int(p.n_layers) {
         // attention rmsnorm
-//        print("l:x[0]=\(String(describing: x?[0]))")
         rmsnorm( s.xb,  x, w.rms_att_weight + l * Int(dim), Int32(Int(dim)))
         
-        // ✅ [1] tmp_xb
-        // 对比把s.xb 和tmp_xb[l]的每一个元素进行对比
-        for xb_idx in 0..<Int(dim) {
-            if let xb = s.xb, let tmp_xb_array = tmp_xb[l]  {
-                let xb_element = xb + xb_idx
-                let tmp_xb_element = tmp_xb_array + xb_idx
-                if abs(tmp_xb_element.pointee - xb_element.pointee) < 0.001 {
 
-//                    print("swift[xiaoxiao]xb_element:\(xb_element.pointee) == tmp_xb_element:\(tmp_xb_element.pointee)")
-                } else {
-                    print("swift[xiaoxiao]xb_element:\(xb_element.pointee),tmp_xb_element:\(tmp_xb_element.pointee)")
-                }
-            }
-        }
-
-        // ✅
         //key and value point to the kv cache
         let loff = Int(l) * Int(p.seq_len) * Int(kv_dim)
-        // 
-        if tmp_loff[l] != loff {
-//            print("swift[xiaoxiao]tmp_loff[l]:\(tmp_loff[l]),loff:\(loff)")
-        }else{
-//            print("swift[xiaoxiao]tmp_loff[l]:\(tmp_loff[l]) == loff:\(loff)")
-        }
         
         // k的长度是 p->n_layers * p->seq_len * kv_dim 比如l=0,就是 0~n_layers*seq_len*kv_dim
         s.k = s.key_cache + loff + pos * Int(kv_dim)
@@ -1045,78 +883,7 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
         matmul(s.q, s.xb, w.wq + l * Int(dim) * Int(dim), Int32(dim), Int32(dim))
         matmul(s.k, s.xb, w.wk + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
         matmul(s.v, s.xb, w.wv + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
-        
-        if l == 0 && token == 1 {
-            // 对比tmp_q_1
-            for i in 0..<Int(dim) {
-                if let token1_q = tmp_q_1 , let s_q = s.q {
-                    if token1_q[i] != s_q[i] {
-                        print("swift[xiaoxiao]token1_q:\(token1_q[i]),s_q:\(s_q[i])")
-                    }
-                }
-            }
-            // 对比tmp_k_1
-            for i in 0..<Int(kv_dim) {
-                if let token1_k = tmp_k_1 , let s_k = s.k {
-                    if token1_k[i] != s_k[i] {
-                        print("swift[xiaoxiao]token1_k:\(token1_k[i]),s_k:\(s_k[i])")
-                    }
-                }
-            }
-            // 对比tmp_v_1
-            for i in 0..<Int(kv_dim) {
-                if let token1_v = tmp_v_1 , let s_v = s.v {
-                    if token1_v[i] != s_v[i] {
-                        print("swift[xiaoxiao]token1_v:\(token1_v[i]),s_v:\(s_v[i])")
-                    }
-                }
-            }
-        }
-
-//        // 对比把s.q 和tmp_q[l]的每一个元素进行对比
-//        /// [3]🟡
-//        for q_idx in 0..<Int(dim) {
-//            if let q = s.q, let tmp_q_array = tmp_q[l]  {
-//                let q_element = q + q_idx
-//                let tmp_q_element = tmp_q_array + q_idx
-//                if tmp_q_element.pointee == q_element.pointee {
-////                    print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
-//                } else {
-//                    print("swift[xiaoxiao]q_element:\(q_element.pointee),tmp_q_element:\(tmp_q_element.pointee)")
-//                }
-//            }else{
-//                print("swift[xiaoxiao]q:\(s.q),tmp_q[l]:\(tmp_q[l])")
-//            }
-//        }
-//        // 对比把s.k 和tmp_k[l]的每一个元素进行对比
-//        for k_idx in 0..<Int(kv_dim) {
-//            if let k = s.k, let tmp_k_array = tmp_k[l]  {
-//                let k_element = k + k_idx
-//                let tmp_k_element = tmp_k_array + k_idx
-//                if tmp_k_element.pointee == k_element.pointee {
-////                    print("swift[xiaoxiao]k_element:\(k_element.pointee),tmp_k_element:\(tmp_k_element.pointee)")
-//                } else {
-//                    print("swift[xiaoxiao]k_element:\(k_element.pointee),tmp_k_element:\(tmp_k_element.pointee)")
-//                }
-//            }else{
-//                print("swift[xiaoxiao]k:\(s.k),tmp_k[l]:\(String(describing: tmp_k[l]))")
-//            }
-//        }
       
-        // 对比把s.v 和tmp_v[l]的每一个元素进行对比
-//        for v_idx in 0..<Int(kv_dim) {
-//            if let v = s.v, let tmp_v_array = tmp_v[l]  {
-//                let v_element = v + v_idx
-//                let tmp_v_element = tmp_v_array + v_idx
-//                if tmp_v_element.pointee == v_element.pointee {
-////                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
-//                } else {
-////                    print("swift[xiaoxiao]v_element:\(v_element.pointee),tmp_v_element:\(tmp_v_element.pointee)")
-//                }
-//            }else{
-//                print("swift[xiaoxiao]v:\(s.v),tmp_v[l]:\(tmp_v[l])")
-//            }
-//        }
 
 
         // RoPE relative positional encoding: complex-valued rotate q and k in each head
@@ -1134,25 +901,6 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
                     let v1 = vec[i + 1]
                     vec[i] = v0 * fcr - v1 * fci
                     vec[i + 1] = v0 * fci + v1 * fcr
-                }
-            }
-        }
-        
-        if l == 0 && token == 1 {
-            // 对比tmp_q_1_rotate
-            for i in 0..<Int(dim) {
-                if let token1_q = tmp_q_1 , let s_q = s.q {
-                    if token1_q[i] != s_q[i] {
-                        print("swift[xiaoxiao]token1_q:\(token1_q[i]),s_q:\(s_q[i])")
-                    }
-                }
-            }
-            // 对比tmp_k_1_rotate
-            for i in 0..<Int(kv_dim) {
-                if let token1_k = tmp_k_1_rotate , let s_k = s.k {
-                    if token1_k[i] != s_k[i] {
-                        print("swift[xiaoxiao]token1_k:\(token1_k[i]),s_k:\(s_k[i])")
-                    }
                 }
             }
         }
@@ -1249,9 +997,9 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
     // for循环遍历p.n_layers
     
     /// 结束
-    for i in 0..<Int(transformer2.config.vocab_size) {
-           logits.append(s.logits![i])
-       }
+    for i in 0..<Int(transformer.config.vocab_size) {
+       logits.append(s.logits![i])
+   }
 
     return logits
 }
@@ -1259,8 +1007,7 @@ func myForward(transformer: inout Transformer,transformer2: inout Transformer,to
 // ----------------------------------------------------------------------------
 // generation loop
 func generate(
-    transformer: Transformer,
-    transformer2: Transformer, tokenizer: Tokenizer, sampler: inout Sampler, prompt: String?,
+    transformer: Transformer,tokenizer: Tokenizer, sampler: inout Sampler, prompt: String?,
     steps: Int
 ) {
     let prompt = prompt ?? ""
@@ -1271,7 +1018,6 @@ func generate(
 
     var tokenizer = tokenizer  // Make the 'tokenizer' parameter mutable
     var transformer = transformer  // Make the 'transformer' parameter mutable
-    var transformer2 = transformer2  // Make the 'transformer' parameter mutable
     encode(
         t: &tokenizer, text: prompt, bos: 1, eos: 0, tokens: &promptTokens,
         n_tokens: &numPromptTokens)
@@ -1288,9 +1034,7 @@ func generate(
     while pos < steps {
 
         // forward the transformer to get logits for the next token
-//        var logits = forward(transformer: &transformer, token: token, pos: pos)
-
-        var logits = myForward(transformer: &transformer, transformer2: &transformer2, token: token, pos: pos)
+        var logits = forward(transformer: &transformer, token: token, pos: pos)
 
         // advance the state machine
         if pos < numPromptTokens - 1 {
@@ -1469,13 +1213,6 @@ if var cString = checkpointPath.cString(using: .utf8) {
     }
 }
 
-var transformer2 = Transformer()
-if var cString = checkpointPath.cString(using: .utf8) {
-    cString.withUnsafeMutableBufferPointer { buffer in
-        build_transformer(&transformer2, buffer.baseAddress)
-    }
-}
-
 if steps == 0 || steps > transformer.config.seq_len { steps = Int(transformer.config.seq_len) }
 
 var tokenizer = buildTokenizer(
@@ -1487,7 +1224,7 @@ var sampler = buildSampler(
 
 if mode == "generate" {
     generate(
-        transformer: transformer,transformer2: transformer2, tokenizer: tokenizer, sampler: &sampler, prompt: prompt,
+        transformer: transformer, tokenizer: tokenizer, sampler: &sampler, prompt: prompt,
         steps: steps)
 } else if mode == "chat" {
 //    chat(
