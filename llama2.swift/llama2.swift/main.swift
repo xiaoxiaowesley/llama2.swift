@@ -348,6 +348,29 @@ func softmax(_ x: inout [Float]) {
     }
 }
 
+
+func softmax_swift(_ x:  [Float])->[Float] {
+    var o:[Float] = []
+    var x = x
+    // find max value (for numerical stability)
+    let maxVal = x.max() ?? 0.0
+
+    // exp and sum
+    var sum: Float = 0.0
+    for i in 0..<x.count {
+        x[i] = exp(x[i] - maxVal)
+        sum += x[i]
+    }
+
+    // normalize
+    for i in 0..<x.count {
+        x[i] /= sum
+        o.append(x[i])
+    }
+    return o
+}
+
+
 func softmax_c(_ x: UnsafeMutablePointer<Float>!, _ size:Int32) {
     // 将x转成[Float]
     var xArray : [Float] = []
@@ -438,19 +461,7 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
         let loff = l * Int(p.seq_len) * kv_dim  // kv cache layer offset for convenience
         s.k = Array(s.key_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
         s.v = Array(s.value_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
-        
-        // 😂😂😂😂😂😂😂😂
-        if token == 1 {
-            for i in 0..<kv_dim {
-                let a = s_x_1[i]
-                let b = s.k[i]
-                if a != b {
-                    print("a[\(i)] = \(a)")
-                    print("b[\(i)] = \(b)")
-                }
-            }
-        }
-        // 👈👈👈👈
+       
 
 
         // qkv matmuls for this position
@@ -459,6 +470,8 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
             kv_dim)
         s.v = matmul_swift(s.xb, Array(w.wv[(l * dim * kv_dim)..<(l * dim * kv_dim + dim * kv_dim)]), dim,
             kv_dim)
+        
+   
 
         // RoPE relative positional encoding: complex-valued rotate q and k in each head
         for i in stride(from: 0, to: dim, by: 2) {
@@ -476,7 +489,8 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
                 vec[i + 1] = v0 * fci + v1 * fcr
             }
         }
-
+        
+        //  ❌
         // multihead attention. iterate over all heads
         for h in 0..<Int(p.n_heads) {
             // get the query vector for this head
@@ -498,7 +512,7 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
             }
 
             // softmax the scores to get attention weights, from 0..pos inclusively
-            softmax(&att)
+            att = softmax_swift(att)
 
             // weighted sum of the values, store back into xb
 //            var xb = Array(s.xb[(h * head_size)..<(h * head_size + head_size)])
@@ -518,6 +532,19 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
                 }
             }
         }
+        
+        // 😂😂😂😂😂😂😂😂 验证验证
+        if token == 1 && l == 0 {
+            for i in 0..<s_x_1.count {
+                let a = s_x_1[i]
+                let b = s.xb[i]
+                if a != b {
+                    print("a[\(i)] = \(a)")
+                    print("b[\(i)] = \(b)")
+                }
+            }
+        }
+        // 👈👈👈👈
 
         // final matmul to get the output of the attention
         s.xb2 = matmul_swift(s.xb, Array(w.wo[(l * dim * dim)..<(l * dim * dim + dim * dim)]), dim, dim)
@@ -549,22 +576,31 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
             s.hb[i] = val
         }
 
-        // final matmul to get the output of the ffn
+        // final matmul to get the output of the ffn ❌
         s.xb = matmul_swift(s.hb,
             Array(w.w2[(l * dim * hidden_dim)..<(l * dim * hidden_dim + hidden_dim * dim)]),
             hidden_dim, dim)
-
+        
+        
+        
+        
         // residual connection
         for i in 0..<dim {
             s.x[i] += s.xb[i]
         }
     }
+    
+  
 
-    // final rmsnorm
+    // final rmsnorm ❌
     s.x = rmsnorm_swift(x: s.x, weight: w.rms_final_weight, size: dim)
 
-    // classifier into logits  //TODO:待确认
-    s.logits = matmul_swift(s.x, w.wcls ?? [], Int(p.dim), Int(p.vocab_size))
+    
+   
+    
+    // classifier into logits
+    s.logits = matmul_swift(s.x, w.wcls!, Int(p.dim), Int(p.vocab_size))
+    
     return s.logits
 }
 
@@ -978,13 +1014,7 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
         // v的长度是 p->n_layers * p->seq_len * kv_dim
         s.v = s.value_cache + loff + pos * Int(kv_dim)
         
-        // ✅✅✅✅✅
-        if token == 1 {
-            for i in 0..<Int(kv_dim) {
-                s_x_1.append(s.v[i])
-            }
-        }
-        // 👈👈👈👈
+       
 
         // qkv matmuls for this position
         
@@ -992,7 +1022,7 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
         matmul(s.q, s.xb, w.wq + l * Int(dim) * Int(dim), Int32(dim), Int32(dim))
         matmul(s.k, s.xb, w.wk + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
         matmul(s.v, s.xb, w.wv + l * Int(dim) * Int(kv_dim), Int32(dim), Int32(kv_dim))
-      
+       
 
         // RoPE relative positional encoding: complex-valued rotate q and k in each head
         for i in stride(from: 0, to: Int(dim), by: 2) {
@@ -1012,7 +1042,8 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
                 }
             }
         }
-
+      
+      
         // multihead attention. iterate over all heads
         // 遍历所有的头
         for h in 0..<Int(p.n_heads) {
@@ -1056,6 +1087,16 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
                 }
             }
         }
+        
+        
+        // ✅✅✅✅✅ 取数据
+        if token == 1 && l == 0 {
+            for i in 0..<Int(dim) {
+                s_x_1.append(s.xb[i])
+            }
+        }
+        // 👈👈👈👈
+        
 
         // final matmul to get the output of the attention
         matmul(s.xb2, s.xb, w.wo + l * Int(dim) * Int(dim), Int32(dim), Int32(dim))
@@ -1096,12 +1137,17 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
 
     }
 
+    
     // final rmsnorm
     rmsnorm_c(x, x, w.rms_final_weight, Int32(dim))
 
+  
+    
     // classifier into logits  //TODO:待确认
     matmul(s.logits, x, w.wcls, Int32(p.dim), Int32(p.vocab_size))
 
+
+    
     // forward all the layers
     // for循环遍历p.n_layers
     
@@ -1147,6 +1193,17 @@ func generate(
         // forward the transformer to get logits for the next token
         var logits2 = forward(transformer: &transformer, token: token, pos: pos)
         var logits = forward_swift(transformer: &transformer_swift, token: token, pos: pos)
+        
+        
+//        if token == 1 {
+//            for i in 0..<Int(transformer_swift.config.vocab_size) {
+//                let a  = logits2[i]
+//                let b  = logits[i]
+//                if a != b {
+//                    print("logits2[\(i)] = \(logits2[Int(i)]) != logits[\(i)] = \(logits[Int(i)])")
+//                }
+//            }
+//        }
 
         // advance the state machine
         if pos < numPromptTokens - 1 {
