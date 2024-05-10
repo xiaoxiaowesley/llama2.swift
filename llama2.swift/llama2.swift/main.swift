@@ -278,7 +278,7 @@ func freeTransformer_swift(t: inout Transformer_swift) {
 // ----------------------------------------------------------------------------
 // neural net blocks; the dynamics of the Transformer
 
-func rmsnorm_swift(o: inout [Float], x: [Float], weight: [Float], size: Int) {
+func rmsnorm_c_swift(o: inout [Float], x: [Float], weight: [Float], size: Int) {
     // calculate sum of squares
     var ss: Float = 0.0
     for j in 0..<size {
@@ -291,6 +291,23 @@ func rmsnorm_swift(o: inout [Float], x: [Float], weight: [Float], size: Int) {
     for j in 0..<size {
         o[j] = weight[j] * (ss * x[j])
     }
+}
+
+func rmsnorm_swift( x: [Float], weight: [Float], size: Int) -> [Float]{
+    var o:[Float] = []
+    // calculate sum of squares
+    var ss: Float = 0.0
+    for j in 0..<size {
+        ss += x[j] * x[j]
+    }
+    ss /= Float(size)
+    ss += 1e-5
+    ss = 1.0 / sqrt(ss)
+    // normalize and scale
+    for j in 0..<size {
+        o.append(weight[j] * (ss * x[j]))
+    }
+    return o
 }
 
 func rmsnorm_c(_ o: UnsafeMutablePointer<Float>!, _  X: UnsafeMutablePointer<Float>!, _  weight: UnsafeMutablePointer<Float>!, _
@@ -307,7 +324,7 @@ func rmsnorm_c(_ o: UnsafeMutablePointer<Float>!, _  X: UnsafeMutablePointer<Flo
     }
     // 调用swift的rmsnorm
     var oArray = Array(repeating: Float(0.0), count: Int(size))
-    rmsnorm_swift(o: &oArray, x: xArray, weight: weightArray, size: Int(size))
+    rmsnorm_c_swift(o: &oArray, x: xArray, weight: weightArray, size: Int(size))
     for i in 0..<size {
         o[Int(i)] = oArray[Int(i)]
     }
@@ -396,7 +413,7 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
     let p = transformer.config
     let w = transformer.weights
     var s = transformer.state
-    var x = s.x
+    // var x = s.x
     let dim = Int(p.dim)
     let kv_dim = (Int(p.dim) * Int(p.n_kv_heads)) / Int(p.n_heads)
     let kv_mul = Int(p.n_heads) / Int(p.n_kv_heads)  // integer multiplier of the kv sharing in multiquery
@@ -404,19 +421,37 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
     let head_size = dim / Int(p.n_heads)
 
     // copy the token embedding into x
-    let content_row = Array(w.token_embedding_table[(token * dim)..<(token * dim + dim)])
-    x = content_row
+    // x = content_row
+    for i in 0..<dim {
+        s.x[i] = w.token_embedding_table[token * dim + i]
+    }
+    
+
 
     // forward all the layers
     for l in 0..<Int(p.n_layers) {
         // attention rmsnorm
-        rmsnorm_swift(
-            o: &s.xb, x: x, weight: Array(w.rms_att_weight[(l * dim)..<(l * dim + dim)]), size: dim)
-
+        s.xb = rmsnorm_swift(x: s.x, weight: Array(w.rms_att_weight[(l * dim)..<(l * dim + dim)]), size: dim)
+        
+    
         // key and value point to the kv cache
         let loff = l * Int(p.seq_len) * kv_dim  // kv cache layer offset for convenience
         s.k = Array(s.key_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
         s.v = Array(s.value_cache[(loff + pos * kv_dim)..<(loff + pos * kv_dim + kv_dim)])
+        
+        // 😂😂😂😂😂😂😂😂
+        if token == 1 {
+            for i in 0..<kv_dim {
+                let a = s_x_1[i]
+                let b = s.k[i]
+                if a != b {
+                    print("a[\(i)] = \(a)")
+                    print("b[\(i)] = \(b)")
+                }
+            }
+        }
+        // 👈👈👈👈
+
 
         // qkv matmuls for this position
         s.q = matmul_swift(s.xb, Array(w.wq[(l * dim * dim)..<(l * dim * dim + dim * dim)]), dim, dim)
@@ -466,7 +501,12 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
             softmax(&att)
 
             // weighted sum of the values, store back into xb
-            var xb = Array(s.xb[(h * head_size)..<(h * head_size + head_size)])
+//            var xb = Array(s.xb[(h * head_size)..<(h * head_size + head_size)])
+            let xb_Idx = h * head_size
+            for i in 0..<Int(head_size) {
+                s.xb[xb_Idx + i] = 0.0
+            }
+            
             for t in 0...pos {
                 // get the value vector for this head and at this timestep
                 let v = Array(s.value_cache[(loff + t * kv_dim + (h / kv_mul) * head_size)..<(loff + t * kv_dim + (h / kv_mul) * head_size + head_size)])
@@ -474,7 +514,7 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
                 let a = att[t]
                 // accumulate the weighted value into xb
                 for i in 0..<head_size {
-                    xb[i] += a * v[i]
+                    s.xb[xb_Idx + i] += a * v[i]
                 }
             }
         }
@@ -484,12 +524,11 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
 
         // residual connection back into x
         for i in 0..<dim {
-            x[i] += s.xb2[i]
+            s.x[i] += s.xb2[i]
         }
 
         // ffn rmsnorm
-        rmsnorm_swift(
-            o: &s.xb, x: x, weight: Array(w.rms_ffn_weight[(l * dim)..<(l * dim + dim)]), size: dim)
+        s.xb = rmsnorm_swift(x: s.x, weight: Array(w.rms_ffn_weight[(l * dim)..<(l * dim + dim)]), size: dim)
 
         // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
         // first calculate self.w1(x) and self.w3(x)
@@ -517,15 +556,15 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
 
         // residual connection
         for i in 0..<dim {
-            x[i] += s.xb[i]
+            s.x[i] += s.xb[i]
         }
     }
 
     // final rmsnorm
-    rmsnorm_swift(o: &x, x: x, weight: w.rms_final_weight, size: dim)
+    s.x = rmsnorm_swift(x: s.x, weight: w.rms_final_weight, size: dim)
 
     // classifier into logits  //TODO:待确认
-    s.logits = matmul_swift(x, w.wcls ?? [], Int(p.dim), Int(p.vocab_size))
+    s.logits = matmul_swift(s.x, w.wcls ?? [], Int(p.dim), Int(p.vocab_size))
     return s.logits
 }
 
@@ -918,16 +957,18 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
     let hidden_dim = p.hidden_dim
     let head_size = dim / p.n_heads
 
-    
-
     // copy the token embedding into x
     
     let content_row = w.token_embedding_table + token * Int(dim)
     memcpy(x,content_row,Int(dim) * MemoryLayout<Float>.size)
+    
+   
 
     for l in 0..<Int(p.n_layers) {
         // attention rmsnorm
         rmsnorm_c( s.xb,  x, w.rms_att_weight + l * Int(dim), Int32(Int(dim)))
+        
+       
 
         //key and value point to the kv cache
         let loff = Int(l) * Int(p.seq_len) * Int(kv_dim)
@@ -936,6 +977,14 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
         s.k = s.key_cache + loff + pos * Int(kv_dim)
         // v的长度是 p->n_layers * p->seq_len * kv_dim
         s.v = s.value_cache + loff + pos * Int(kv_dim)
+        
+        // ✅✅✅✅✅
+        if token == 1 {
+            for i in 0..<Int(kv_dim) {
+                s_x_1.append(s.v[i])
+            }
+        }
+        // 👈👈👈👈
 
         // qkv matmuls for this position
         
@@ -1096,8 +1145,8 @@ func generate(
     while pos < steps {
 
         // forward the transformer to get logits for the next token
-        var logits = forward(transformer: &transformer, token: token, pos: pos)
-        var logits2 = forward_swift(transformer: &transformer_swift, token: token, pos: pos)
+        var logits2 = forward(transformer: &transformer, token: token, pos: pos)
+        var logits = forward_swift(transformer: &transformer_swift, token: token, pos: pos)
 
         // advance the state machine
         if pos < numPromptTokens - 1 {
@@ -1279,6 +1328,158 @@ if var cString = checkpointPath.cString(using: .utf8) {
 var transformer_swift = Transformer_swift()
 transformer_swift = buildTransformer(checkpointPath)
 
+// ✅✅✅✅✅
+var s_x_1:[Float]=[]
+func compareTransform(transformer :Transformer, transformer_swift : Transformer_swift){
+    // 对比transformer和transformer_swift的各个字段是否相同
+    // 1. 对比Config
+    if transformer.config.dim != transformer_swift.config.dim {
+        print("dim is not equal")
+    }
+    if transformer.config.hidden_dim != transformer_swift.config.hidden_dim {
+        print("hidden_dim is not equal")
+    }
+    if transformer.config.n_layers != transformer_swift.config.n_layers {
+        print("n_layers is not equal")
+    }
+    if transformer.config.n_heads != transformer_swift.config.n_heads {
+        print("n_heads is not equal")
+    }
+    if transformer.config.n_kv_heads != transformer_swift.config.n_kv_heads {
+        print("n_kv_heads is not equal")
+    }
+    if transformer.config.vocab_size != transformer_swift.config.vocab_size {
+        print("vocab_size is not equal")
+    }
+    if transformer.config.seq_len != transformer_swift.config.seq_len {
+        print("seq_len is not equal")
+    }
+    let layer = transformer.config.n_layers
+    let dim = transformer.config.dim
+    let n_heads = transformer.config.n_heads
+    let head_size = dim / n_heads
+    let n_kv_heads = transformer.config.n_kv_heads
+    // 2. 对比Weights
+    // token_embedding_table
+    if transformer_swift.weights.token_embedding_table.count !=  transformer.config.vocab_size * transformer.config.dim {
+        print("token_embedding_table is not equal")
+    }
+    for i in 0..<transformer_swift.weights.token_embedding_table.count {
+        if transformer.weights.token_embedding_table[i] != transformer_swift.weights.token_embedding_table[i] {
+            print("token_embedding_table is not equal")
+        }
+    }
+    // rms_att_weight
+    if transformer_swift.weights.rms_att_weight.count !=  transformer.config.n_layers * transformer.config.dim {
+        print("rms_att_weight is not equal")
+    }
+    for i in 0..<transformer_swift.weights.rms_att_weight.count {
+        if transformer.weights.rms_att_weight[i] != transformer_swift.weights.rms_att_weight[i] {
+            print("rms_att_weight is not equal")
+        }
+    }
+    // rms_ffn_weight
+    if transformer_swift.weights.rms_ffn_weight.count !=  transformer.config.n_layers * transformer.config.dim {
+        print("rms_ffn_weight is not equal")
+    }
+    for i in 0..<transformer_swift.weights.rms_ffn_weight.count {
+        if transformer.weights.rms_ffn_weight[i] != transformer_swift.weights.rms_ffn_weight[i] {
+            print("rms_ffn_weight is not equal")
+        }
+    }
+    // wq
+    if transformer_swift.weights.wq.count !=  transformer.config.n_layers * transformer.config.dim * transformer.config.dim {
+        print("wq is not equal")
+    }
+    for i in 0..<transformer_swift.weights.wq.count {
+        if transformer.weights.wq[i] != transformer_swift.weights.wq[i] {
+            print("wq is not equal")
+        }
+    }
+
+    // wk
+    if transformer_swift.weights.wk.count !=  layer * dim * n_kv_heads * head_size {
+        print("wk count is not equal")
+    }
+    for i in 0..<transformer_swift.weights.wk.count {
+        if transformer.weights.wk[i] != transformer_swift.weights.wk[i] {
+            print("wk is not equal")
+        }
+    }
+
+    // wv
+    if transformer_swift.weights.wv.count !=  layer * dim * n_kv_heads * head_size {
+        print("wv is not equal")
+    }
+    for i in 0..<transformer_swift.weights.wv.count {
+        if transformer.weights.wv[i] != transformer_swift.weights.wv[i] {
+            print("wv is not equal")
+        }
+    }
+    // wo
+    if transformer_swift.weights.wo.count !=  transformer.config.n_layers * transformer.config.dim * transformer.config.dim {
+        print("wo is not equal")
+    }
+    for i in 0..<transformer_swift.weights.wo.count {
+        if transformer.weights.wo[i] != transformer_swift.weights.wo[i] {
+            print("wo is not equal")
+        }
+    }
+    // w1
+    if transformer_swift.weights.w1.count !=  transformer.config.n_layers * transformer.config.dim * transformer.config.hidden_dim {
+        print("w1 is not equal")
+    }
+    for i in 0..<transformer_swift.weights.w1.count {
+        if transformer.weights.w1[i] != transformer_swift.weights.w1[i] {
+            print("w1 is not equal")
+        }
+    }
+    // w2
+    if transformer_swift.weights.w2.count !=  transformer.config.n_layers * transformer.config.hidden_dim * transformer.config.dim {
+        print("w2 is not equal")
+    }
+    for i in 0..<transformer_swift.weights.w2.count {
+        if transformer.weights.w2[i] != transformer_swift.weights.w2[i] {
+            print("w2 is not equal")
+        }
+    }
+    // w3
+    if transformer_swift.weights.w3.count !=  transformer.config.n_layers * transformer.config.dim * transformer.config.hidden_dim {
+        print("w3 is not equal")
+    }
+
+    for i in 0..<transformer_swift.weights.w3.count {
+        if transformer.weights.w3[i] != transformer_swift.weights.w3[i] {
+            print("w3 is not equal")
+        }
+    }
+    // wcls
+    if transformer_swift.weights.wcls!.count !=  transformer.config.dim * transformer.config.vocab_size {
+        print("wcls is not equal")
+    }
+    for i in 0..<transformer_swift.weights.wcls!.count {
+        if transformer.weights.wcls[i] != transformer_swift.weights.wcls![i] {
+            print("wcls is not equal")
+        }
+    }
+    // rms_final_weight
+    if transformer_swift.weights.rms_final_weight.count !=  transformer.config.dim {
+        print("rms_final_weight is not equal")
+    }
+    for i in 0..<transformer_swift.weights.rms_final_weight.count {
+        if transformer.weights.rms_final_weight[i] != transformer_swift.weights.rms_final_weight[i] {
+            print("rms_final_weight is not equal")
+        }
+    }
+
+    // 3. 对比State
+    // 4. 对比fd
+    // 5. 对比file_size
+    
+}
+compareTransform(transformer: transformer, transformer_swift: transformer_swift)
+// 👈👈👈👈
+
 if steps == 0 || steps > transformer.config.seq_len { steps = Int(transformer.config.seq_len) }
 
 var tokenizer = buildTokenizer(
@@ -1298,6 +1499,8 @@ if mode == "generate" {
 //        cliSystemPrompt: systemPrompt, steps: steps)
 } else {
     print("unknown mode: \(mode)")
+
+
     errorUsage()
 }
 
