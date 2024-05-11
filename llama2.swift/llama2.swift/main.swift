@@ -490,6 +490,11 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
             }
         }
         
+        for i in 0..<kv_dim {
+            s.key_cache[loff + pos * kv_dim + i] = s.k[i]   
+            s.value_cache[loff + pos * kv_dim + i] = s.v[i]
+        }
+        
         //  ❌
         // multihead attention. iterate over all heads
         for h in 0..<Int(p.n_heads) {
@@ -510,9 +515,14 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
                 // save the score to the attention buffer
                 att[t] = score
             }
-
+            
             // softmax the scores to get attention weights, from 0..pos inclusively
             att = softmax_swift(att)
+
+            for t in 0...pos {
+                s.att[h * Int(p.seq_len) + t] = att[t]
+            }
+            
 
             // weighted sum of the values, store back into xb
 //            var xb = Array(s.xb[(h * head_size)..<(h * head_size + head_size)])
@@ -532,19 +542,9 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
                 }
             }
         }
-        
-        // 😂😂😂😂😂😂😂😂 验证验证
-        if token == 1 && l == 0 {
-            for i in 0..<s_x_1.count {
-                let a = s_x_1[i]
-                let b = s.xb[i]
-                if a != b {
-                    print("a[\(i)] = \(a)")
-                    print("b[\(i)] = \(b)")
-                }
-            }
-        }
-        // 👈👈👈👈
+     
+  
+     
 
         // final matmul to get the output of the attention
         s.xb2 = matmul_swift(s.xb, Array(w.wo[(l * dim * dim)..<(l * dim * dim + dim * dim)]), dim, dim)
@@ -580,8 +580,7 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
         s.xb = matmul_swift(s.hb,
             Array(w.w2[(l * dim * hidden_dim)..<(l * dim * hidden_dim + hidden_dim * dim)]),
             hidden_dim, dim)
-        
-        
+    
         
         
         // residual connection
@@ -594,13 +593,32 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
 
     // final rmsnorm ❌
     s.x = rmsnorm_swift(x: s.x, weight: w.rms_final_weight, size: dim)
-
     
+    // 😂😂😂😂😂😂😂😂 验证验证
+    if token == 1  {
+        for i in 0..<s_x_1.count {
+            let a = s_x_1[i]
+            let b = s.x[i]
+            if a != b {
+                print("a[\(i)] = \(a)")
+                print("b[\(i)] = \(b)")
+            }
+        }
+    }
+    // 👈👈👈👈
+    
+    // ✅✅✅✅✅ 取数据
+        if token == 1 /*&& l == 0*/  {
+            for i in 0..<Int(dim) {
+                s_x_1.append(s.x[i])
+            }
+        }
+    // 👈👈👈👈
    
     
     // classifier into logits
     s.logits = matmul_swift(s.x, w.wcls!, Int(p.dim), Int(p.vocab_size))
-    
+    transformer.state.logits = s.logits
     return s.logits
 }
 
@@ -1089,13 +1107,6 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
         }
         
         
-        // ✅✅✅✅✅ 取数据
-        if token == 1 && l == 0 {
-            for i in 0..<Int(dim) {
-                s_x_1.append(s.xb[i])
-            }
-        }
-        // 👈👈👈👈
         
 
         // final matmul to get the output of the attention
