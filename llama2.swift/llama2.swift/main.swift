@@ -501,7 +501,7 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
             // get the query vector for this head
             let q = Array(s.q[(h * head_size)..<(h * head_size + head_size)])
             // attention scores for this head
-            var att = Array(s.att[(h * Int(p.seq_len))..<(h * Int(p.seq_len) + Int(p.seq_len))])
+            var att = Array(s.att[(h * Int(p.seq_len))..<(h * Int(p.seq_len) + Int(pos+1))])
             // iterate over all timesteps, including the current one
             for t in 0...pos {
                 // get the key vector for this head and at this timestep
@@ -518,14 +518,23 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
             
             // softmax the scores to get attention weights, from 0..pos inclusively
             att = softmax_swift(att)
-
-            for t in 0...pos {
-                s.att[h * Int(p.seq_len) + t] = att[t]
+            for t in 0..<Int(pos+1) {
+                s.att[h * Int(p.seq_len) + Int(t)] = att[Int(t)]
             }
-            
+            // MARK: 😂😂😂😂😂😂😂😂 验证验证
+            if token == 1 && l == 0 && h == 0  {
+                for i in 0..<s_x_1.count {
+                    let a = s_x_1[i]
+                    let b = s.att[i]
+                    if a != b {
+                        print("a[\(i)] = \(a)")
+                        print("b[\(i)] = \(b)")
+                    }
+                }
+            }
+            // 👈👈👈👈
 
             // weighted sum of the values, store back into xb
-//            var xb = Array(s.xb[(h * head_size)..<(h * head_size + head_size)])
             let xb_Idx = h * head_size
             for i in 0..<Int(head_size) {
                 s.xb[xb_Idx + i] = 0.0
@@ -541,10 +550,7 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
                     s.xb[xb_Idx + i] += a * v[i]
                 }
             }
-        }
-     
-  
-     
+        }     
 
         // final matmul to get the output of the attention
         s.xb2 = matmul_swift(s.xb, Array(w.wo[(l * dim * dim)..<(l * dim * dim + dim * dim)]), dim, dim)
@@ -588,37 +594,21 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
             s.x[i] += s.xb[i]
         }
     }
-    
+
   
 
     // final rmsnorm ❌
     s.x = rmsnorm_swift(x: s.x, weight: w.rms_final_weight, size: dim)
     
-    // 😂😂😂😂😂😂😂😂 验证验证
-    if token == 1  {
-        for i in 0..<s_x_1.count {
-            let a = s_x_1[i]
-            let b = s.x[i]
-            if a != b {
-                print("a[\(i)] = \(a)")
-                print("b[\(i)] = \(b)")
-            }
-        }
-    }
-    // 👈👈👈👈
-    
-    // ✅✅✅✅✅ 取数据
-        if token == 1 /*&& l == 0*/  {
-            for i in 0..<Int(dim) {
-                s_x_1.append(s.x[i])
-            }
-        }
-    // 👈👈👈👈
+  
+
    
     
     // classifier into logits
     s.logits = matmul_swift(s.x, w.wcls!, Int(p.dim), Int(p.vocab_size))
     transformer.state.logits = s.logits
+
+    
     return s.logits
 }
 
@@ -1083,9 +1073,27 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
                 att[t] = score
             }
 
+            if token == 1 && l == 0 && h == 0  {
+                print("c 1:att[0]:\(att[0])")
+            }
+            
             // softmax the scores to get attention weights, from 0..pos inclusively
             softmax_c(att,Int32(pos + 1))
             
+            if token == 1 && l == 0 && h == 0  {
+                print("c 2:att[0]:\(att[0])")
+            }
+            
+            // MARK: ✅✅✅✅✅ 取数据
+                if token == 1 && l == 0 && h == 0  {
+                    for i in 0..<Int(pos + 1) {
+//                        if let x = att {
+                        let v = att[i]
+                            s_x_1.append(v)
+//                        }
+                    }
+                }
+            // 👈👈👈👈
 
             // weighted sum of the values, store back into xb
             let xb = s.xb + h * Int(head_size)
@@ -1107,6 +1115,7 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
         }
         
         
+
         
 
         // final matmul to get the output of the attention
@@ -1147,16 +1156,17 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
         }
 
     }
-
+    
+    
     
     // final rmsnorm
     rmsnorm_c(x, x, w.rms_final_weight, Int32(dim))
 
-  
     
     // classifier into logits  //TODO:待确认
     matmul(s.logits, x, w.wcls, Int32(p.dim), Int32(p.vocab_size))
 
+    
 
     
     // forward all the layers
