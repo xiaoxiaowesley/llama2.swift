@@ -521,18 +521,6 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
             for t in 0..<Int(pos+1) {
                 s.att[h * Int(p.seq_len) + Int(t)] = att[Int(t)]
             }
-            // MARK: 😂😂😂😂😂😂😂😂 验证验证
-            if token == 1 && l == 0 && h == 0  {
-                for i in 0..<s_x_1.count {
-                    let a = s_x_1[i]
-                    let b = s.att[i]
-                    if a != b {
-                        print("a[\(i)] = \(a)")
-                        print("b[\(i)] = \(b)")
-                    }
-                }
-            }
-            // 👈👈👈👈
 
             // weighted sum of the values, store back into xb
             let xb_Idx = h * head_size
@@ -550,10 +538,14 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
                     s.xb[xb_Idx + i] += a * v[i]
                 }
             }
-        }     
+          
+        }
 
         // final matmul to get the output of the attention
         s.xb2 = matmul_swift(s.xb, Array(w.wo[(l * dim * dim)..<(l * dim * dim + dim * dim)]), dim, dim)
+        
+        
+    
 
         // residual connection back into x
         for i in 0..<dim {
@@ -593,6 +585,8 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
         for i in 0..<dim {
             s.x[i] += s.xb[i]
         }
+        
+ 
     }
 
   
@@ -600,7 +594,7 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
     // final rmsnorm ❌
     s.x = rmsnorm_swift(x: s.x, weight: w.rms_final_weight, size: dim)
     
-  
+
 
    
     
@@ -609,6 +603,18 @@ func forward_swift(transformer: inout Transformer_swift, token: Int, pos: Int) -
     transformer.state.logits = s.logits
 
     
+    // MARK: 😂😂😂😂😂😂😂😂 验证验证
+    if token == 1 /*&& l == 0  */{
+        for i in 0..<s_x_1.count {
+            let a = s_x_1[i]
+            let b = s.logits[i]
+            if a != b {
+                print("a[\(i)] = \(a)")
+                print("b[\(i)] = \(b)")
+            }
+        }
+    }
+    // 👈👈👈👈
     return s.logits
 }
 
@@ -1073,27 +1079,8 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
                 att[t] = score
             }
 
-            if token == 1 && l == 0 && h == 0  {
-                print("c 1:att[0]:\(att[0])")
-            }
-            
             // softmax the scores to get attention weights, from 0..pos inclusively
             softmax_c(att,Int32(pos + 1))
-            
-            if token == 1 && l == 0 && h == 0  {
-                print("c 2:att[0]:\(att[0])")
-            }
-            
-            // MARK: ✅✅✅✅✅ 取数据
-                if token == 1 && l == 0 && h == 0  {
-                    for i in 0..<Int(pos + 1) {
-//                        if let x = att {
-                        let v = att[i]
-                            s_x_1.append(v)
-//                        }
-                    }
-                }
-            // 👈👈👈👈
 
             // weighted sum of the values, store back into xb
             let xb = s.xb + h * Int(head_size)
@@ -1112,10 +1099,10 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
                     xb[i] += a * v[i]
                 }
             }
-        }
-        
-        
+            
+            
 
+        }
         
 
         // final matmul to get the output of the attention
@@ -1126,6 +1113,8 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
                 x[i] += s.xb2[i]
             }
         }
+        
+      
         // ffn rmsnorm
         rmsnorm_c(s.xb, x, w.rms_ffn_weight + l * Int(dim), Int32(dim))
 
@@ -1177,6 +1166,19 @@ func forward(transformer: inout Transformer,token:Int,pos:Int)->[Float]{
        logits.append(s.logits![i])
    }
 
+    
+    
+    // MARK: ✅✅✅✅✅ 取数据
+        if token == 1 /*&& l == 0*/  {
+            for i in 0..<Int(transformer.config.vocab_size) {
+//                if let x = x {
+                    let v = logits[i]
+                    s_x_1.append(v)
+//                }
+            }
+        }
+    // 👈👈👈👈
+    
     return logits
 }
 
